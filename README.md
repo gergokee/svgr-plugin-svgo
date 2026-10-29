@@ -77,6 +77,9 @@ documented transformation options:
   Babel or other suitable loader. `jsxRuntimeImport` requires `babel: false`
   and a custom JSX transform. With Babel enabled, project Babel config is not
   consulted; the loader uses its own JSX/TypeScript transforms.
+- `babelTargets`, for example `{ ie: '11' }`, enables Babel's preset-env for
+  generated JavaScript. It does not add polyfills or transpile other modules.
+  This option cannot be combined with `babel: false`.
 
 The loader handles the guide's `resourceQuery`/`issuer` patterns and can be
 chained before `url-loader` or `file-loader` in webpack. If an asset loader
@@ -87,14 +90,21 @@ possible. Chained asset loaders require a loader context with `fs.readFile`.
 The tested webpack and Turbopack configurations are in `test/bundlers.test.cjs`.
 
 This is not a promise of complete compatibility: the loader fixes its own SVGR
-plugin pipeline, so custom `plugins` are not accepted. CLI-only file-output
+plugin pipeline, so custom `plugins` are not accepted, including when discovered
+in SVGR configuration. CLI-only file-output
 options such as `outDir`, `index` and `filenameCase` do not apply and are
-rejected. It does not produce source maps. Turbopack loader options must be
-serializable, so functions such as custom templates must be supplied through
-an appropriate configuration file instead of the loader options. When runtime
-config is enabled, webpack caching is disabled to avoid persisting results
-without tracked configuration dependencies; restart the build after changing
-configuration files.
+rejected. When requested by the bundler, source maps point to the generated JSX
+or TSX, not to the original SVG; upstream asset-loader maps are not composed.
+Turbopack loader options must be serializable, so functions such as custom
+templates must be supplied through an appropriate configuration file instead
+of loader options. With runtime config enabled, caching is disabled and config
+files within the bundler's project root are tracked as watch dependencies.
+Configuration outside the root, imported JS configuration dependencies and
+some bundler-specific watch behavior may still require a restart. Webpack watch
+rebuilds are tested; Turbopack production builds are tested separately.
+
+TypeScript declarations are provided for the plugin and loader subpath. The
+loader subpath's `LoaderOptions` type includes `babelTargets`.
 
 ## Configuration and defaults
 
@@ -115,20 +125,39 @@ discovered. `runtimeConfig: false` skips discovery but not an explicit
 
 Without a configured `plugins` list, the plugin runs SVGO's `preset-default`,
 then `prefixIds`. SVGO 4 preserves `viewBox` by default. When `native: true`,
-`removeStyleElement` is also applied; SVGR's JSX plugin handles native element
-conversion and removal of unsupported elements. Options such as `multipass`
-can be supplied without replacing these defaults. If a configuration provides
-`plugins`, it replaces the default plugin list **entirely**, so add
-`prefixIds` yourself if needed; an explicit `removeViewBox` can remove the
+CSS is inlined even when selectors match multiple elements, and presentation
+styles are converted to SVG attributes before style elements are removed.
+Remaining styles, such as unsupported media queries, pseudo-classes or CSS
+properties, cause an error rather than being silently dropped. This does not
+guarantee that every SVG/CSS feature is supported by react-native-svg; test
+the result on your target platform. SVGR's JSX plugin handles native element
+conversion and removal of unsupported elements.
+
+**A custom `svgoConfig.plugins` list replaces the defaults entirely**, including
+ID prefixing and native CSS safeguards. For example, `plugins: ['preset-default']`
+does not enable `prefixIds`. Use `svgoConfig: {}` or set options such as
+`multipass` without a plugin list to retain defaults. If specifying a custom
+list, explicitly include and configure `prefixIds` as appropriate:
+
+```js
+svgoConfig: {
+  plugins: ['preset-default', 'prefixIds'],
+}
+```
+
+The example's SVGO `prefixIds` uses SVGO's own prefix behavior, not this
+package's content-and-path hash. An explicit `removeViewBox` can remove the
 viewBox where SVGO considers it redundant. Other SVGO options pass through.
 The SVGR `state.filePath`, when present, is passed as SVGO's `path` and takes
 precedence over a configured `path`.
 
-Default ID/class prefixes are derived from a SHA-256 hash of the input markup,
-not an absolute path, and are reproducible across machines. Different markup
-normally gets different prefixes. Identical SVG markup, including repeated
-renders of the same component, gets the same prefix; this is **not** per-instance
-ID isolation. Use per-instance IDs in your component if that is required.
+Default ID/class prefixes are derived from a SHA-256 hash of input markup and
+the file path relative to the project root (webpack's `rootContext`, or
+`process.cwd()` for standalone SVGR). Identical files in different paths get
+different prefixes, and the same project-relative path and markup are stable
+across build roots. Without a file path, only the markup is used. Repeated
+renders of the same component still share IDs: this is **not** per-instance ID
+isolation. Use per-instance IDs in your component if that is required.
 Custom `prefixIds` settings are the caller's responsibility, including their
 determinism. Invalid types, malformed XML and non-SVG roots produce errors.
 This optimizer is **not** an SVG sanitizer; sanitize untrusted content separately.
@@ -174,6 +203,7 @@ npm ci
 npm test             # plugin and SVGR integration
 npm run test:bundlers # packs and installs an isolated consumer; requires network
 npm run test:legacy-optimizer # optional isolated behavior comparison; requires network
+npm run licenses:update
 npm audit
 npm audit --omit=dev
 npm pack --dry-run

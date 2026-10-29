@@ -18,7 +18,11 @@ test('default optimization preserves viewBox and prefixes IDs and references rep
   assert.ok(result.includes(`url(#${id})`), result);
   assert.equal(result, plugin(svg, { runtimeConfig: false }));
   assert.notEqual(result, plugin(svg.replace('red', 'blue'), { runtimeConfig: false }));
-  assert.equal(result, plugin(svg, { runtimeConfig: false }, { filePath: '/another/root/icon.svg' }));
+  const first = plugin(svg, { runtimeConfig: false }, { filePath: 'icons/a.svg' });
+  assert.equal(first, plugin(svg, { runtimeConfig: false }, { filePath: 'icons/a.svg' }));
+  assert.notEqual(first, plugin(svg, { runtimeConfig: false }, { filePath: 'icons/b.svg' }));
+  const caller = (root) => ({ filePath: path.join(root, 'icons/a.svg'), caller: { projectRoot: root } });
+  assert.equal(plugin(svg, { runtimeConfig: false }, caller('/build/a')), plugin(svg, { runtimeConfig: false }, caller('/build/b')));
 });
 
 test('svgo: false returns input unchanged before validating it or loading config', () => {
@@ -71,4 +75,16 @@ test('native mode removes style elements when using defaults', () => {
   const input = '<svg xmlns="http://www.w3.org/2000/svg"><style>.unused{fill:red}</style><path d="M0 0h1v1z"/></svg>';
   assert.doesNotMatch(plugin(input, { native: true, runtimeConfig: false }), /<style/);
   assert.match(plugin(input, { native: true, svgoConfig: { plugins: [] } }), /<style/);
+});
+
+test('native mode applies shared CSS and rejects rules that cannot be inlined', () => {
+  const input = '<svg xmlns="http://www.w3.org/2000/svg"><style>.shape{fill:red}</style><rect class="shape" width="5" height="5"/><rect class="shape" x="6" width="5" height="5"/></svg>';
+  const result = plugin(input, { native: true, runtimeConfig: false });
+  assert.match(result, /fill="red"/);
+  assert.doesNotMatch(result, /<style/);
+  assert.throws(() => plugin(input.replace('.shape{', '.shape:hover{'), { native: true, runtimeConfig: false }), /could not be inlined safely/);
+  assert.throws(() => plugin(input.replace('.shape{fill:red}', '@media (min-width:500px){.shape{fill:red}}'),
+    { native: true, runtimeConfig: false }), /could not be inlined safely/);
+  assert.throws(() => plugin('<svg><path d="M0 0h1v1z" style="--custom:red"/></svg>',
+    { native: true, runtimeConfig: false }), /could not be converted/);
 });

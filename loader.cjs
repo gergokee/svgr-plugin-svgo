@@ -3,10 +3,12 @@
 const { transformAsync } = require('@babel/core');
 const transformJsx = require('@babel/plugin-transform-react-jsx');
 const transformTypescript = require('@babel/plugin-transform-typescript');
-const { transform } = require('@svgr/core');
+const presetEnv = require('@babel/preset-env');
+const { DEFAULT_CONFIG, transform } = require('@svgr/core');
 const jsxPlugin = require('@svgr/plugin-jsx');
 const prettier = require('prettier');
 const optimize = require('./index.cjs');
+const { registerConfigFiles, resolveSvgrConfig } = require('./config.cjs');
 
 function validateOptions(options) {
   if (options.babel != null && typeof options.babel !== 'boolean') throw new TypeError('svgr-plugin-svgo/loader: babel must be boolean');
@@ -15,6 +17,9 @@ function validateOptions(options) {
   }
   if (options.jsxRuntimeImport && options.babel !== false) {
     throw new Error('svgr-plugin-svgo/loader: custom jsxRuntimeImport requires babel: false and a custom JSX transform');
+  }
+  if (options.babel === false && options.babelTargets != null) {
+    throw new Error('svgr-plugin-svgo/loader: babelTargets requires the built-in Babel step');
   }
 }
 
@@ -45,6 +50,7 @@ module.exports = function svgComponentLoader(source) {
   // Runtime config can affect output without appearing in webpack's dependency
   // graph. Avoid persistent stale output rather than claiming it is cacheable.
   if (options.runtimeConfig !== false && typeof this.cacheable === 'function') this.cacheable(false);
+  registerConfigFiles(this, options);
 
   Promise.resolve().then(async () => {
     validateOptions(options);
@@ -60,20 +66,24 @@ module.exports = function svgComponentLoader(source) {
         else resolve(data.toString());
       }));
     }
-    let effectiveOptions;
+    const effectiveOptions = { ...DEFAULT_CONFIG, ...resolveSvgrConfig(options, this.resourcePath), ...options };
+    if (effectiveOptions.plugins != null) {
+      throw new Error('svgr-plugin-svgo/loader: unsupported option plugins in SVGR configuration');
+    }
+    validateOptions(effectiveOptions);
     const optimizer = (markup, config, state) => {
-      validateOptions(config);
-      effectiveOptions = config;
-      return optimize(markup, config, state);
+      return optimize(markup, { ...config, runtimeConfig: effectiveOptions.runtimeConfig }, state);
     };
     let jsx = await transform(markup, {
-      ...options,
+      ...effectiveOptions,
+      runtimeConfig: false,
       plugins: [optimizer, jsxPlugin],
     }, {
       filePath: this.resourcePath,
-      caller: { name: 'svgr-plugin-svgo/loader', previousExport: previousExport && asEsModule(previousExport) },
+      caller: { name: 'svgr-plugin-svgo/loader', projectRoot: this.rootContext, previousExport: previousExport && asEsModule(previousExport) },
     });
     if (effectiveOptions.prettier !== false) {
+      if (effectiveOptions.runtimeConfig !== false) await prettier.clearConfigCache();
       const discovered = effectiveOptions.prettierConfig != null || effectiveOptions.runtimeConfig === false
         ? null : await prettier.resolveConfig(this.resourcePath);
       jsx = await prettier.format(jsx, {
@@ -81,7 +91,14 @@ module.exports = function svgComponentLoader(source) {
         parser: effectiveOptions.typescript ? 'typescript' : 'babel',
       });
     }
-    if (effectiveOptions.babel === false) return jsx;
+    const sourceFileName = `${this.resourcePath}.svgr-generated.${effectiveOptions.typescript ? 'tsx' : 'jsx'}`;
+    if (effectiveOptions.babel === false) {
+      const map = this.sourceMap ? {
+        version: 3, sources: [sourceFileName], sourcesContent: [jsx], names: [],
+        mappings: 'AAAA' + ';AACA'.repeat(jsx.split('\n').length - 1),
+      } : undefined;
+      return { code: jsx, map };
+    }
     const jsxOptions = effectiveOptions.jsxRuntime === 'automatic'
       ? { runtime: 'automatic' }
       : effectiveOptions.jsxRuntime === 'classic-preact'
@@ -89,14 +106,18 @@ module.exports = function svgComponentLoader(source) {
         : { runtime: 'classic' };
     const result = await transformAsync(jsx, {
       filename: this.resourcePath,
+      sourceMaps: Boolean(this.sourceMap),
+      sourceFileName,
       babelrc: false,
       configFile: false,
+      browserslistConfigFile: false,
+      presets: effectiveOptions.babelTargets == null ? [] : [[presetEnv, { targets: effectiveOptions.babelTargets, modules: false }]],
       plugins: [
         ...(effectiveOptions.typescript ? [[transformTypescript, { isTSX: true, allExtensions: true }]] : []),
         [transformJsx, jsxOptions],
       ],
     });
     if (!result || typeof result.code !== 'string') throw new Error('Babel did not return JavaScript');
-    return result.code;
-  }).then((code) => callback(null, code), (error) => callback(error));
+    return { code: result.code, map: result.map || undefined };
+  }).then(({ code, map }) => callback(null, code, map), (error) => callback(error));
 };

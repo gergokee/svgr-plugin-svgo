@@ -1,7 +1,7 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
-const { dirname, resolve } = require('node:path');
+const { dirname, relative, resolve, sep } = require('node:path');
 const { cosmiconfigSync } = require('cosmiconfig');
 const { optimize } = require('svgo');
 
@@ -39,6 +39,22 @@ const validateRoot = {
   }),
 };
 
+const validateNativeStyles = {
+  name: 'validateNativeStyles',
+  fn: () => ({
+    element: {
+      enter(node) {
+        if (node.name === 'style' && node.children.some((child) => child.value?.trim())) {
+          throw new Error('Native SVG contains CSS that could not be inlined safely; remove or manually convert the remaining styles');
+        }
+        if (node.attributes?.style?.trim()) {
+          throw new Error('Native SVG contains inline CSS that could not be converted to presentation attributes');
+        }
+      },
+    },
+  }),
+};
+
 function svgrPluginSvgo(source, options = {}, state = {}) {
   if (options.svgo === false) return source;
   if (typeof source !== 'string') {
@@ -51,12 +67,16 @@ function svgrPluginSvgo(source, options = {}, state = {}) {
     throw new TypeError('svgr-plugin-svgo: SVGO configuration must be an object');
   }
 
-  // Content-based prefixes avoid machine-dependent absolute paths and are stable
-  // across builds. Identical SVG source yields identical prefixes.
-  const prefix = `svg_${createHash('sha256').update(source).digest('hex').slice(0, 12)}`;
+  // Use project-relative paths so identical files in different locations have
+  // different IDs, without baking the absolute build directory into output.
+  const projectRoot = state.caller?.projectRoot || process.cwd();
+  const identity = filePath ? relative(projectRoot, resolve(filePath)).split(sep).join('/') : '';
+  const prefix = `svg_${createHash('sha256').update(identity).update('\0').update(source).digest('hex').slice(0, 12)}`;
   const defaultPlugins = [
-    'preset-default',
-    ...(options.native ? ['removeStyleElement'] : []),
+    options.native
+      ? { name: 'preset-default', params: { overrides: { inlineStyles: { onlyMatchedOnce: false } } } }
+      : 'preset-default',
+    ...(options.native ? ['convertStyleToAttrs', validateNativeStyles, 'removeStyleElement'] : []),
     { name: 'prefixIds', params: { prefix } },
   ];
   const plugins = config.plugins ?? defaultPlugins;

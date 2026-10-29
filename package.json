@@ -12,25 +12,29 @@
   "bugs": "https://github.com/gergokee/svgr-plugin-svgo/issues",
   "keywords": ["svgr", "svgo", "svg", "plugin", "react"],
   "main": "index.cjs",
+  "types": "index.d.cts",
   "exports": {
-    ".": "./index.cjs",
-    "./loader": "./loader.cjs"
+    ".": { "types": "./index.d.cts", "default": "./index.cjs" },
+    "./loader": { "types": "./loader.d.cts", "default": "./loader.cjs" }
   },
-  "files": ["index.cjs", "loader.cjs", "DEPENDENCIES.md"],
+  "files": ["index.cjs", "index.d.cts", "loader.cjs", "loader.d.cts", "config.cjs", "DEPENDENCIES.md"],
   "engines": { "node": ">=20.9.0" },
   "scripts": {
     "test": "node --test test/plugin.test.cjs test/svgr.test.cjs test/loader.test.cjs",
     "test:bundlers": "node --test test/bundlers.test.cjs",
     "test:legacy-optimizer": "node --test test/legacy-optimizer.test.cjs",
     "test:all": "npm test && npm run test:bundlers",
+    "licenses:update": "node scripts/licenses.cjs",
     "audit:production": "npm audit --omit=dev"
   },
   "dependencies": {
     "@babel/core": "^7.29.7",
     "@babel/plugin-transform-react-jsx": "^7.27.1",
     "@babel/plugin-transform-typescript": "^7.27.1",
+    "@babel/preset-env": "^7.29.7",
     "@svgr/core": "^8.1.0",
     "@svgr/plugin-jsx": "^8.1.0",
+    "@types/babel__core": "^7.20.5",
     "cosmiconfig": "^9.0.0",
     "prettier": "^3.6.2",
     "svgo": "^4.1.0"

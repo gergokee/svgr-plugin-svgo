@@ -25,10 +25,27 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
       'svgr-plugin-svgo': `file:${path.join(project, pack.filename)}`,
       '@babel/core': '7.29.7', '@babel/plugin-transform-react-jsx': '7.29.7',
       'babel-loader': '9.2.1', 'file-loader': '6.2.0', 'url-loader': '4.1.1',
+      typescript: '5.9.3', '@types/node': '22.19.11',
       next: '16.4.3', react: '19.2.0', 'react-dom': '19.2.0', webpack: '5.104.1',
     },
   }, null, 2));
   run(npm, ['install', '--ignore-scripts', '--no-audit', '--no-fund']);
+  fs.writeFileSync(path.join(project, 'types.mts'), `
+    import plugin from 'svgr-plugin-svgo';
+    import loader from 'svgr-plugin-svgo/loader';
+    const output: string = plugin('<svg/>', { svgo: false }, { filePath: 'icon.svg' });
+    const fn: typeof loader = loader;
+    console.log(output, fn);
+  `);
+  fs.writeFileSync(path.join(project, 'types.cts'), `
+    import plugin = require('svgr-plugin-svgo');
+    import loader = require('svgr-plugin-svgo/loader');
+    const options: loader.LoaderOptions = { exportType: 'named', babelTargets: { ie: '11' } };
+    const result: string = plugin('<svg/>', { svgo: false });
+    console.log(result, options);
+  `);
+  run(process.execPath, [path.join(project, 'node_modules', 'typescript', 'bin', 'tsc'),
+    '--noEmit', '--strict', '--module', 'nodenext', '--moduleResolution', 'nodenext', 'types.mts', 'types.cts']);
 
   fs.mkdirSync(path.join(project, 'app'));
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><linearGradient id="paint"><stop stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs><path d="M0 0h10v10z" fill="url(#paint)"/></svg>';
@@ -67,6 +84,12 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   const render = (component) => renderToStaticMarkup(react.createElement(component));
   await build(config);
   assertSvg(render(require(path.join(project, 'dist', 'bundle.js')).ReactComponent));
+
+  await build({ ...config, mode: 'development', devtool: 'source-map', output: { ...config.output, filename: 'mapped.js' } });
+  const map = JSON.parse(fs.readFileSync(path.join(project, 'dist', 'mapped.js.map'), 'utf8'));
+  const jsxIndex = map.sources.findIndex((source) => source.includes('svgr-generated.jsx'));
+  assert.ok(jsxIndex >= 0, 'webpack source map should include generated JSX');
+  assert.match(map.sourcesContent[jsxIndex], /<svg/);
 
   // Webpack's resourceQuery and issuer rules can separate URL and component imports.
   fs.writeFileSync(path.join(project, 'query.js'), 'export { default as url } from "./app/icon.svg?url"; export { default as Icon } from "./app/icon.svg";');
@@ -107,9 +130,63 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   });
   assertSvg(render(require(path.join(project, 'dist', 'custom-babel.js')).Icon));
 
+  // Render the native component using lightweight host-element stand-ins.
+  fs.writeFileSync(path.join(project, 'app', 'native.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><style>.shape{fill:red}</style><rect class="shape" width="5" height="5"/><rect class="shape" x="6" width="5" height="5"/></svg>');
+  fs.writeFileSync(path.join(project, 'native-entry.js'), 'export { default as Icon } from "./app/native.svg";');
+  fs.writeFileSync(path.join(project, 'native-mock.js'), `import * as React from 'react';
+    export default function Svg(props) { return React.createElement('svg', props); }
+    export function Path(props) { return React.createElement('path', props); }
+    export function Rect(props) { return React.createElement('rect', props); }
+  `);
+  await build({ ...config, entry: './native-entry.js', output: { ...config.output, filename: 'native.js' },
+    resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader', options: { native: true } }] }] },
+  });
+  const nativeMarkup = render(require(path.join(project, 'dist', 'native.js')).Icon);
+  assert.match(nativeMarkup, /fill="red"/);
+  assert.match(nativeMarkup, /M0 0h5v5H0zM6 0h5v5H6z/);
+
   fs.writeFileSync(path.join(project, 'next.config.js'), `module.exports = {
     turbopack: { rules: { '*.svg': { loaders: [{ loader: 'svgr-plugin-svgo/loader', options: ${JSON.stringify(options)} }], as: '*.js' } } }
   };`);
   run(process.execPath, [path.join(project, 'node_modules', 'next', 'dist', 'bin', 'next'), 'build']);
   assertSvg(fs.readFileSync(path.join(project, '.next', 'server', 'app', 'index.html'), 'utf8'));
+
+  // A real watch rebuild must pick up a changed config without restarting webpack.
+  const configFile = path.join(project, 'app', '.svgrrc');
+  fs.writeFileSync(configFile, JSON.stringify({ icon: true }));
+  fs.writeFileSync(path.join(project, 'watch.js'), 'export { default as Icon } from "./app/icon.svg";');
+  const compiler = webpack({ ...config, mode: 'development', entry: './watch.js',
+    output: { ...config.output, filename: 'watch-bundle.js' },
+    module: { rules: [{ test: /\.svg$/, use: ['svgr-plugin-svgo/loader'] }] },
+  });
+  await new Promise((resolve, reject) => {
+    let runs = 0;
+    let changed = false;
+    let closed = false;
+    let updateTimer;
+    let watcher;
+    const finish = (error) => {
+      if (closed) return;
+      closed = true;
+      clearTimeout(timeout);
+      clearTimeout(updateTimer);
+      watcher.close(() => compiler.close(() => error ? reject(error) : resolve()));
+    };
+    const timeout = setTimeout(() => finish(new Error('webpack did not rebuild after config change')), 30000);
+    watcher = compiler.watch({ poll: 100 }, (error, stats) => {
+      if (error || stats.hasErrors()) return finish(error || new Error(stats.toString({ errors: true })));
+      const bundle = fs.readFileSync(path.join(project, 'dist', 'watch-bundle.js'), 'utf8');
+      if (runs++ === 0) {
+        if (!bundle.includes('1em')) return finish(new Error('initial config was not applied'));
+        updateTimer = setTimeout(() => {
+          fs.writeFileSync(configFile, JSON.stringify({ icon: false }));
+          changed = true;
+        }, 300);
+      } else if (changed) {
+        if (bundle.includes('1em')) return finish(new Error('changed config was not applied'));
+        finish();
+      }
+    });
+  });
 });
