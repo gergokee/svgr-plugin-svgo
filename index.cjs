@@ -41,7 +41,7 @@ function nativeStylePolicies(mode, state) {
   const report = (message) => {
     if (mode === 'error') throw new Error(message);
     if (mode === 'warn' && !warned) {
-      const warning = new Error(`svgr-plugin-svgo: ${message}; unsupported CSS will be dropped and appearance may change`);
+      const warning = new Error(`@gergokee/svgr-plugin-svgo: ${message}; unsupported CSS will be dropped and appearance may change`);
       if (state.caller?.onNativeCssWarning) state.caller.onNativeCssWarning(warning);
       else process.emitWarning(warning);
       warned = true;
@@ -151,20 +151,20 @@ function nativeStylePolicies(mode, state) {
 function svgrPluginSvgo(source, options = {}, state = {}) {
   if (options.svgo === false) return source;
   if (typeof source !== 'string') {
-    throw new TypeError('svgr-plugin-svgo: SVG input must be a string');
+    throw new TypeError('@gergokee/svgr-plugin-svgo: SVG input must be a string');
   }
   const nativeCss = options.nativeCss === undefined ? 'error' : options.nativeCss;
   if (!['error', 'warn', 'drop'].includes(nativeCss)) {
-    throw new TypeError('svgr-plugin-svgo: nativeCss must be error, warn, or drop');
+    throw new TypeError('@gergokee/svgr-plugin-svgo: nativeCss must be error, warn, or drop');
   }
   const prefixIds = options.prefixIds === undefined ? 'auto' : options.prefixIds;
   if (prefixIds !== 'auto' && prefixIds !== false) {
-    throw new TypeError('svgr-plugin-svgo: prefixIds must be auto or false');
+    throw new TypeError('@gergokee/svgr-plugin-svgo: prefixIds must be auto or false');
   }
 
   const filePath = state.filePath;
   const config = options.svgoConfig ?? (options.runtimeConfig === false ? undefined : resolveSvgoConfig(filePath)) ?? {};
-  validateConfig(config, 'svgr-plugin-svgo: SVGO configuration');
+  validateConfig(config, '@gergokee/svgr-plugin-svgo: SVGO configuration');
 
   // Use project-relative paths so identical files in different locations have
   // different IDs, without baking the absolute build directory into output.
@@ -179,7 +179,7 @@ function svgrPluginSvgo(source, options = {}, state = {}) {
   ];
   const plugins = config.plugins ?? defaultPlugins;
   if (!Array.isArray(plugins)) {
-    throw new TypeError('svgr-plugin-svgo: SVGO config.plugins must be an array');
+    throw new TypeError('@gergokee/svgr-plugin-svgo: SVGO config.plugins must be an array');
   }
   const hasPrefixIds = plugins.some((entry) => entry === 'prefixIds' || (entry && typeof entry === 'object' && entry.name === 'prefixIds'));
   const automaticPrefix = prefixIds === 'auto' && !hasPrefixIds ? [{ name: 'prefixIds', params: { prefix } }] : [];
@@ -199,7 +199,7 @@ function svgrPluginSvgo(source, options = {}, state = {}) {
       plugins: [validateRoot, ...nativePrelude, ...plugins, ...nativePostlude, ...automaticPrefix],
     }).data;
   } catch (error) {
-    throw new Error(`svgr-plugin-svgo: failed to optimize${filePath ? ` ${filePath}` : ''}: ${error.message}`, { cause: error });
+    throw new Error(`@gergokee/svgr-plugin-svgo: failed to optimize${filePath ? ` ${filePath}` : ''}: ${error.message}`, { cause: error });
   }
 }
 

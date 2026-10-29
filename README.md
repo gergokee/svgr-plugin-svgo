@@ -1,4 +1,4 @@
-# svgr-plugin-svgo
+# @gergokee/svgr-plugin-svgo
 
 An independent SVGR plugin that optimizes SVG markup with SVGO 4, plus a
 webpack-compatible loader for SVG React components. Supports Node.js 20.9 or
@@ -16,7 +16,7 @@ into separate packages is a possible future change.
 Install it with `@svgr/core` and `@svgr/plugin-jsx`:
 
 ```sh
-npm install --save-dev svgr-plugin-svgo @svgr/core @svgr/plugin-jsx
+npm install --save-dev @gergokee/svgr-plugin-svgo @svgr/core @svgr/plugin-jsx
 ```
 
 Then list it before the JSX plugin:
@@ -26,7 +26,7 @@ const { transform } = require('@svgr/core');
 
 async function makeComponent(svgMarkup) {
   return transform(svgMarkup, {
-    plugins: ['svgr-plugin-svgo', '@svgr/plugin-jsx'],
+    plugins: ['@gergokee/svgr-plugin-svgo', '@svgr/plugin-jsx'],
   }, { filePath: 'icons/example.svg', componentName: 'Example' });
 }
 ```
@@ -36,7 +36,7 @@ unchanged; it takes precedence over all optimization and validation.
 
 ## Use the loader
 
-The same package also exports `svgr-plugin-svgo/loader`. After installation,
+The same package also exports `@gergokee/svgr-plugin-svgo/loader`. After installation,
 it accepts SVG markup and emits a JavaScript module containing a React
 component; React must be installed by the consuming application. For example,
 this is a Next.js Turbopack rule:
@@ -47,7 +47,7 @@ module.exports = {
     rules: {
       '*.svg': {
         loaders: [{
-          loader: 'svgr-plugin-svgo/loader',
+          loader: '@gergokee/svgr-plugin-svgo/loader',
           options: {
             exportType: 'named',
             namedExport: 'ReactComponent',
@@ -254,7 +254,7 @@ dependency used by compatible SVGR tooling:
 ```json
 {
   "overrides": {
-    "@svgr/plugin-svgo": "npm:svgr-plugin-svgo@0.1.0"
+    "@svgr/plugin-svgo": "npm:@gergokee/svgr-plugin-svgo@0.1.1"
   }
 }
 ```

@@ -11,15 +11,15 @@ const optimize = require('./index.cjs');
 const { registerConfigFiles, resolveSvgrConfig } = require('./config.cjs');
 
 function validateOptions(options) {
-  if (options.babel != null && typeof options.babel !== 'boolean') throw new TypeError('svgr-plugin-svgo/loader: babel must be boolean');
+  if (options.babel != null && typeof options.babel !== 'boolean') throw new TypeError('@gergokee/svgr-plugin-svgo/loader: babel must be boolean');
   if (![undefined, 'classic', 'automatic', 'classic-preact'].includes(options.jsxRuntime)) {
-    throw new Error('svgr-plugin-svgo/loader: unsupported jsxRuntime');
+    throw new Error('@gergokee/svgr-plugin-svgo/loader: unsupported jsxRuntime');
   }
   if (options.jsxRuntimeImport && options.babel !== false) {
-    throw new Error('svgr-plugin-svgo/loader: custom jsxRuntimeImport requires babel: false and a custom JSX transform');
+    throw new Error('@gergokee/svgr-plugin-svgo/loader: custom jsxRuntimeImport requires babel: false and a custom JSX transform');
   }
   if (options.babel === false && options.babelTargets != null) {
-    throw new Error('svgr-plugin-svgo/loader: babelTargets requires the built-in Babel step');
+    throw new Error('@gergokee/svgr-plugin-svgo/loader: babelTargets requires the built-in Babel step');
   }
 }
 
@@ -43,7 +43,7 @@ module.exports = function svgComponentLoader(source) {
   const unsupported = ['plugins', 'outDir', 'index', 'indexTemplate', 'ignoreExisting', 'filenameCase', 'ext']
     .find((name) => options[name] != null);
   if (unsupported) {
-    callback(new Error(`svgr-plugin-svgo/loader: unsupported option ${unsupported}`));
+    callback(new Error(`@gergokee/svgr-plugin-svgo/loader: unsupported option ${unsupported}`));
     return;
   }
 
@@ -59,7 +59,7 @@ module.exports = function svgComponentLoader(source) {
     let markup = input;
     if (previousExport) {
       if (!this.fs || typeof this.fs.readFile !== 'function') {
-        throw new Error('svgr-plugin-svgo/loader: reading SVG after an asset loader requires loader context fs.readFile');
+        throw new Error('@gergokee/svgr-plugin-svgo/loader: reading SVG after an asset loader requires loader context fs.readFile');
       }
       markup = await new Promise((resolve, reject) => this.fs.readFile(this.resourcePath, (error, data) => {
         if (error) reject(error);
@@ -68,7 +68,7 @@ module.exports = function svgComponentLoader(source) {
     }
     const effectiveOptions = { ...DEFAULT_CONFIG, ...resolveSvgrConfig(options, this.resourcePath), ...options };
     if (effectiveOptions.plugins != null) {
-      throw new Error('svgr-plugin-svgo/loader: unsupported option plugins in SVGR configuration');
+      throw new Error('@gergokee/svgr-plugin-svgo/loader: unsupported option plugins in SVGR configuration');
     }
     validateOptions(effectiveOptions);
     const optimizer = (markup, config, state) => {
@@ -81,7 +81,7 @@ module.exports = function svgComponentLoader(source) {
     }, {
       filePath: this.resourcePath,
       caller: {
-        name: 'svgr-plugin-svgo/loader',
+        name: '@gergokee/svgr-plugin-svgo/loader',
         projectRoot: this.rootContext,
         previousExport: previousExport && asEsModule(previousExport),
         onNativeCssWarning: typeof this.emitWarning === 'function' ? (warning) => this.emitWarning(warning) : undefined,

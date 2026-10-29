@@ -22,7 +22,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
     name: 'independent-svg-loader-fixture',
     private: true,
     dependencies: {
-      'svgr-plugin-svgo': `file:${path.join(project, pack.filename)}`,
+      '@gergokee/svgr-plugin-svgo': `file:${path.join(project, pack.filename)}`,
       '@babel/core': '7.29.7', '@babel/plugin-transform-react-jsx': '7.29.7',
       'babel-loader': '9.2.1', 'file-loader': '6.2.0', 'url-loader': '4.1.1',
       typescript: '5.9.3', '@types/node': '22.19.11',
@@ -31,15 +31,15 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   }, null, 2));
   run(npm, ['install', '--ignore-scripts', '--no-audit', '--no-fund']);
   fs.writeFileSync(path.join(project, 'types.mts'), `
-    import plugin from 'svgr-plugin-svgo';
-    import loader from 'svgr-plugin-svgo/loader';
+    import plugin from '@gergokee/svgr-plugin-svgo';
+    import loader from '@gergokee/svgr-plugin-svgo/loader';
     const output: string = plugin('<svg/>', { svgo: false }, { filePath: 'icon.svg' });
     const fn: typeof loader = loader;
     console.log(output, fn);
   `);
   fs.writeFileSync(path.join(project, 'types.cts'), `
-    import plugin = require('svgr-plugin-svgo');
-    import loader = require('svgr-plugin-svgo/loader');
+    import plugin = require('@gergokee/svgr-plugin-svgo');
+    import loader = require('@gergokee/svgr-plugin-svgo/loader');
     const options: loader.LoaderOptions = { exportType: 'named', babelTargets: { ie: '11' }, nativeCss: 'warn', prefixIds: 'auto' };
     const result: string = plugin('<svg/>', { svgo: false, nativeCss: 'drop', prefixIds: false });
     console.log(result, options);
@@ -64,7 +64,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
     module.exports = {
       context: __dirname, mode: 'production', target: 'node', entry: './entry.js',
       output: { path: path.resolve(__dirname, 'dist'), filename: 'bundle.js', library: { type: 'commonjs2' } },
-      module: { rules: [{ test: /\\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader', options: ${JSON.stringify(options)} }] }] }
+      module: { rules: [{ test: /\\.svg$/, use: [{ loader: '@gergokee/svgr-plugin-svgo/loader', options: ${JSON.stringify(options)} }] }] }
     };
   `);
   const webpack = require(require.resolve('webpack', { paths: [project] }));
@@ -96,7 +96,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   await build({ ...config, entry: './query.js', output: { ...config.output, filename: 'query.js' },
     module: { rules: [
       { test: /\.svg$/i, resourceQuery: /url/, type: 'asset/inline' },
-      { test: /\.svg$/i, issuer: /\.[jt]sx?$/, resourceQuery: { not: [/url/] }, use: ['svgr-plugin-svgo/loader'] },
+      { test: /\.svg$/i, issuer: /\.[jt]sx?$/, resourceQuery: { not: [/url/] }, use: ['@gergokee/svgr-plugin-svgo/loader'] },
     ] },
   });
   const query = require(path.join(project, 'dist', 'query.js'));
@@ -112,7 +112,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
     const filename = `${assetLoader}.js`;
     await build({ ...config, entry: './chained.js', output: { ...config.output, filename },
       module: { rules: [{ test: /\.svg$/, use: [
-        { loader: 'svgr-plugin-svgo/loader', options: { namedExport: 'Vector' } },
+        { loader: '@gergokee/svgr-plugin-svgo/loader', options: { namedExport: 'Vector' } },
         { loader: assetLoader, options: assetOptions },
       ] }] },
     });
@@ -125,7 +125,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   await build({ ...config, entry: './custom-babel.js', output: { ...config.output, filename: 'custom-babel.js' },
     module: { rules: [{ test: /\.svg$/, use: [
       { loader: 'babel-loader', options: { babelrc: false, configFile: false, plugins: ['@babel/plugin-transform-react-jsx'] } },
-      { loader: 'svgr-plugin-svgo/loader', options: { babel: false } },
+      { loader: '@gergokee/svgr-plugin-svgo/loader', options: { babel: false } },
     ] }] },
   });
   assertSvg(render(require(path.join(project, 'dist', 'custom-babel.js')).Icon));
@@ -141,7 +141,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   `);
   await build({ ...config, entry: './native-entry.js', output: { ...config.output, filename: 'native.js' },
     resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
-    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader',
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: '@gergokee/svgr-plugin-svgo/loader',
       options: { native: true, svgoConfig: { plugins: ['removeStyleElement'] } } }] }] },
   });
   const nativeMarkup = render(require(path.join(project, 'dist', 'native.js')).Icon);
@@ -152,7 +152,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   const nativeStructural = await build({ ...config, entry: './native-structural-entry.js',
     output: { ...config.output, filename: 'native-structural.js' },
     resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
-    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader',
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: '@gergokee/svgr-plugin-svgo/loader',
       options: { native: true, nativeCss: 'warn', svgoConfig: { plugins: [] } } }] }] },
   });
   assert.equal(nativeStructural.hasWarnings(), false);
@@ -167,7 +167,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   const nativeHas = await build({ ...config, entry: './native-has-entry.js',
     output: { ...config.output, filename: 'native-has.js' },
     resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
-    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader',
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: '@gergokee/svgr-plugin-svgo/loader',
       options: { native: true, nativeCss: 'warn', prefixIds: false, svgoConfig: { plugins: [] } } }] }] },
   });
   assert.equal(nativeHas.hasWarnings(), false);
@@ -181,7 +181,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   const nativeLayer = await build({ ...config, entry: './native-layer-entry.js',
     output: { ...config.output, filename: 'native-layer.js' },
     resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
-    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader',
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: '@gergokee/svgr-plugin-svgo/loader',
       options: { native: true, nativeCss: 'warn', svgoConfig: { plugins: [] } } }] }] },
   });
   assert.match(nativeLayer.toString({ warnings: true }), /unsupported CSS will be dropped/);
@@ -193,7 +193,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   fs.writeFileSync(path.join(project, 'native-warn-entry.js'), 'export { default as Icon } from "./app/native-warn.svg";');
   const nativeWarnings = await build({ ...config, entry: './native-warn-entry.js', output: { ...config.output, filename: 'native-warn.js' },
     resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
-    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader',
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: '@gergokee/svgr-plugin-svgo/loader',
       options: { native: true, nativeCss: 'warn', svgoConfig: { plugins: [] } } }] }] },
   });
   assert.match(nativeWarnings.toString({ warnings: true }), /unsupported CSS will be dropped/);
@@ -206,7 +206,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   fs.writeFileSync(path.join(project, 'app', 'page.js'), 'import { ReactComponent as A } from "./a/icon.svg"; import { ReactComponent as B } from "./b/icon.svg"; export default function Page() { return <><A /><B /></>; }');
   const nextOptions = { exportType: 'named', namedExport: 'ReactComponent', svgoConfig: { plugins: ['preset-default'] }, prefixIds: 'auto' };
   fs.writeFileSync(path.join(project, 'next.config.js'), `module.exports = {
-    turbopack: { rules: { '*.svg': { loaders: [{ loader: 'svgr-plugin-svgo/loader', options: ${JSON.stringify(nextOptions)} }], as: '*.js' } } }
+    turbopack: { rules: { '*.svg': { loaders: [{ loader: '@gergokee/svgr-plugin-svgo/loader', options: ${JSON.stringify(nextOptions)} }], as: '*.js' } } }
   };`);
   run(process.execPath, [path.join(project, 'node_modules', 'next', 'dist', 'bin', 'next'), 'build']);
   const html = fs.readFileSync(path.join(project, '.next', 'server', 'app', 'index.html'), 'utf8');
@@ -222,7 +222,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   fs.writeFileSync(path.join(project, 'watch.js'), 'export { default as Icon } from "./app/icon.svg";');
   const compiler = webpack({ ...config, mode: 'development', entry: './watch.js',
     output: { ...config.output, filename: 'watch-bundle.js' },
-    module: { rules: [{ test: /\.svg$/, use: ['svgr-plugin-svgo/loader'] }] },
+    module: { rules: [{ test: /\.svg$/, use: ['@gergokee/svgr-plugin-svgo/loader'] }] },
   });
   await new Promise((resolve, reject) => {
     let runs = 0;

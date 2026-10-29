@@ -120,8 +120,8 @@ function readConfigResult(result, label) {
 
 function resolveSvgrConfig(options, filePath) {
   if (options.runtimeConfig === false) return null;
-  const explorer = createConfigExplorer('svgr', svgrPlaces, 'svgr-plugin-svgo/loader');
-  const readResult = (result) => readConfigResult(result, 'svgr-plugin-svgo/loader: SVGR config');
+  const explorer = createConfigExplorer('svgr', svgrPlaces, '@gergokee/svgr-plugin-svgo/loader');
+  const readResult = (result) => readConfigResult(result, '@gergokee/svgr-plugin-svgo/loader: SVGR config');
   if (options.configFile) return readResult(explorer.load(resolve(options.configFile)));
   let directory = dirname(resolve(filePath));
   while (true) {
@@ -134,11 +134,11 @@ function resolveSvgrConfig(options, filePath) {
 }
 
 function resolveSvgoConfig(filePath) {
-  const explorer = createConfigExplorer('svgo', svgoPlaces, 'svgr-plugin-svgo');
+  const explorer = createConfigExplorer('svgo', svgoPlaces, '@gergokee/svgr-plugin-svgo');
   let directory = filePath ? dirname(resolve(filePath)) : process.cwd();
   while (true) {
     const result = explorer.search(directory);
-    if (result) return readConfigResult(result, 'svgr-plugin-svgo: SVGO config');
+    if (result) return readConfigResult(result, '@gergokee/svgr-plugin-svgo: SVGO config');
     const parent = dirname(directory);
     if (parent === directory) return null;
     directory = parent;

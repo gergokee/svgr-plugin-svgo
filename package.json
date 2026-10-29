@@ -1,6 +1,6 @@
 {
-  "name": "svgr-plugin-svgo",
-  "version": "0.1.0",
+  "name": "@gergokee/svgr-plugin-svgo",
+  "version": "0.1.1",
   "description": "An independent SVGR optimization plugin and webpack-compatible SVG loader",
   "license": "MIT",
   "repository": {
