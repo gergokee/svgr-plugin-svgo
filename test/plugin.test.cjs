@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { optimize } = require('svgo');
 const plugin = require('../index.cjs');
 
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><!--comment--><defs><linearGradient id="paint"><stop stop-color="red"/></linearGradient></defs><path fill="url(#paint)" d="M0 0h10v10H0z"/></svg>';
@@ -237,6 +238,91 @@ test('native mode inlines structural selectors with a leading style element', ()
   assert.doesNotThrow(() => plugin(input('@charset "UTF-8";'), { native: true, nativeCss: 'warn', runtimeConfig: false },
     { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } }));
   assert.equal(warnings.length, 0);
+});
+
+test('native mode inlines static :has selectors onto the correct groups', () => {
+  const cases = [
+    {
+      css: 'g:has(.b){fill:red}',
+      groups: '<g id="yes"><path class="b" d="M0 0h1v1z"/></g><g id="no"><path class="c" d="M2 0h1v1z"/></g>',
+    },
+    {
+      css: 'g:has(> .b){fill:red}',
+      groups: '<g id="yes"><path class="b" d="M0 0h1v1z"/></g><g id="no"><g><path class="b" d="M2 0h1v1z"/></g></g>',
+    },
+    {
+      css: 'g:has(+ g.b){fill:red}',
+      groups: '<g id="yes"><path d="M0 0h1v1z"/></g><g class="b"><path d="M2 0h1v1z"/></g><g id="no"><path d="M4 0h1v1z"/></g>',
+    },
+    {
+      css: 'g:has(~ g.b){fill:red}',
+      groups: '<g id="yes"><path d="M0 0h1v1z"/></g><g><path d="M2 0h1v1z"/></g><g class="b"><path d="M4 0h1v1z"/></g><g id="no"><path d="M6 0h1v1z"/></g>',
+    },
+    {
+      css: 'g:not(:has(.b)){fill:red}',
+      groups: '<g id="no"><path class="b" d="M0 0h1v1z"/></g><g id="yes"><path class="c" d="M2 0h1v1z"/></g>',
+    },
+    {
+      css: 'g:has(#b){fill:red}g{fill:blue}',
+      groups: '<g id="yes"><path id="b" d="M0 0h1v1z"/></g><g id="no"><path d="M2 0h1v1z"/></g>',
+      nonMatchFill: 'blue',
+    },
+  ];
+  for (const { css, groups, nonMatchFill } of cases) {
+    const source = `<svg><style>${css}</style>${groups}</svg>`;
+    const warnings = [];
+    const output = plugin(source, { native: true, nativeCss: 'warn', runtimeConfig: false,
+      prefixIds: false, svgoConfig: { plugins: [] } }, { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } });
+    const group = (id) => output.match(new RegExp(`<g\\b(?=[^>]*\\bid="${id}")[^>]*>`))?.[0];
+    assert.ok(group('yes'), css);
+    assert.ok(group('no'), css);
+    assert.match(group('yes'), /fill="red"/, css);
+    if (nonMatchFill) assert.match(group('no'), /fill="(?:blue|#00f)"/, css);
+    else assert.doesNotMatch(group('no'), /fill="red"/, css);
+    assert.equal(warnings.length, 0, css);
+    assert.doesNotMatch(output, /<style/, css);
+  }
+  const defaultInput = '<svg><style>g:has(.b){fill:red}</style><g><path class="b" d="M0 0h1v1z"/></g><g><path class="c" d="M2 0h1v1z"/></g></svg>';
+  const defaultPaths = plugin(defaultInput, { native: true, runtimeConfig: false }).match(/<path\b[^>]*\/>/g);
+  assert.equal(defaultPaths.length, 2);
+  assert.match(defaultPaths[0], /fill="red"/);
+  assert.doesNotMatch(defaultPaths[1], /fill="red"/);
+});
+
+test('native mode keeps dynamic selectors nested inside :has blocked', () => {
+  const source = '<svg><style>g{stroke:red}g:has(.b:hover){fill:blue}</style><g><path class="b" d="M0 0h1v1z"/></g></svg>';
+  assert.throws(() => plugin(source, { native: true, runtimeConfig: false }), /could not be inlined safely/);
+  const warnings = [];
+  const output = plugin(source, { native: true, nativeCss: 'warn', runtimeConfig: false },
+    { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } });
+  assert.equal(warnings.length, 1);
+  assert.match(output, /stroke="red"/);
+  assert.doesNotMatch(output, /fill="(?:blue|#00f)"|hover/);
+  assert.throws(() => plugin(source.replace(':hover', ':lang(en)'), { native: true, runtimeConfig: false }), /could not be inlined safely/);
+});
+
+test('native mode rejects :lang and :dir, which SVGO does not inline in tested cases', () => {
+  const cases = [
+    ['xml:lang="en-US"', '', 'path:lang(en)'],
+    ['lang="en-US"', '', 'path:lang(en)'],
+    ['dir="rtl"', '', 'path:dir(rtl)'],
+    ['', 'xml:lang="en-US"', 'path:lang(en)'],
+    ['', 'lang="en"', 'path:lang(en)'],
+    ['', 'dir="rtl"', 'path:dir(rtl)'],
+  ];
+  for (const [rootAttribute, pathAttribute, selector] of cases) {
+    const source = `<svg ${rootAttribute}><style>${selector}{fill:red}</style><path ${pathAttribute} d="M0 0h1v1z"/></svg>`;
+    const direct = optimize(source, { plugins: ['mergeStyles', { name: 'inlineStyles', params: { onlyMatchedOnce: false } },
+      'convertStyleToAttrs'] }).data;
+    assert.match(direct, /<style>/, selector);
+    assert.doesNotMatch(direct, /fill="red"/, selector);
+    assert.throws(() => plugin(source, { native: true, runtimeConfig: false }), /could not be inlined safely/, selector);
+    const warnings = [];
+    const output = plugin(source, { native: true, nativeCss: 'warn', runtimeConfig: false },
+      { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } });
+    assert.equal(warnings.length, 1, selector);
+    assert.doesNotMatch(output, /<style|fill="red"/, selector);
+  }
 });
 
 test('native CSS warn mode removes dynamic selector branches without dropping static branches', () => {

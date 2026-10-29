@@ -21,7 +21,7 @@ const validateRoot = {
 };
 
 const staticPseudoClasses = new Set([
-  'not', 'is', 'where', 'root', 'empty',
+  'not', 'is', 'where', 'has', 'root', 'empty',
   'nth-child', 'nth-last-child', 'nth-of-type', 'nth-last-of-type',
   'first-child', 'last-child', 'only-child', 'first-of-type', 'last-of-type', 'only-of-type',
 ]);

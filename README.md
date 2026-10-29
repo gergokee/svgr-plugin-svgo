@@ -168,13 +168,17 @@ Remaining styles, such as unsupported media queries, pseudo-classes or CSS
 properties, cause an error rather than being silently dropped by default. A
 preflight check detects interactive pseudo-classes such as `:hover` and
 `:focus`, pseudo-elements, and every at-rule except `@charset` before
-optimization. Only these pseudo-classes are allowed: `:not`, `:is`, `:where`,
+optimization. Only these pseudo-classes are allowed: `:not`, `:is`, `:where`, `:has`,
 `:root`, `:empty`, `:nth-child`, `:nth-last-child`, `:nth-of-type`,
 `:nth-last-of-type`, `:first-child`, `:last-child`, `:only-child`,
 `:first-of-type`, `:last-of-type` and `:only-of-type`. Nested selectors are
 checked too. SVGO can inline supported static selectors; unmatched selectors
 and `@charset` can be discarded without a warning. Other CSS that cannot be
 evaluated or inlined may still be rejected.
+Selectors are evaluated against the SVG at build time; later changes to the
+component's structure or attributes are not re-evaluated. `:lang()` and
+`:dir()` remain unsupported: SVGO 4.1 did not inline tested inherited-language
+and direction cases, so those rules follow the configured native CSS policy.
 For native icon sets containing unsupported design-tool styles, set:
 
 ```js

@@ -137,6 +137,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
     export default function Svg(props) { return React.createElement('svg', props); }
     export function Path(props) { return React.createElement('path', props); }
     export function Rect(props) { return React.createElement('rect', props); }
+    export function G(props) { return React.createElement('g', props); }
   `);
   await build({ ...config, entry: './native-entry.js', output: { ...config.output, filename: 'native.js' },
     resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
@@ -160,6 +161,20 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   assert.equal(renderedPaths.length, 2);
   assert.match(renderedPaths[0], /fill="red"/);
   assert.doesNotMatch(renderedPaths[1], /fill="red"/);
+
+  fs.writeFileSync(path.join(project, 'app', 'native-has.svg'), '<svg><style>g:has(.b){fill:red}</style><g id="yes"><path class="b" d="M0 0h1v1z"/></g><g id="no"><path class="c" d="M2 0h1v1z"/></g></svg>');
+  fs.writeFileSync(path.join(project, 'native-has-entry.js'), 'export { default as Icon } from "./app/native-has.svg";');
+  const nativeHas = await build({ ...config, entry: './native-has-entry.js',
+    output: { ...config.output, filename: 'native-has.js' },
+    resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader',
+      options: { native: true, nativeCss: 'warn', prefixIds: false, svgoConfig: { plugins: [] } } }] }] },
+  });
+  assert.equal(nativeHas.hasWarnings(), false);
+  const hasMarkup = render(require(path.join(project, 'dist', 'native-has.js')).Icon);
+  const hasGroup = (id) => hasMarkup.match(new RegExp(`<g\\b(?=[^>]*\\bid="${id}")[^>]*>`))?.[0];
+  assert.match(hasGroup('yes'), /fill="red"/);
+  assert.doesNotMatch(hasGroup('no'), /fill="red"/);
 
   fs.writeFileSync(path.join(project, 'app', 'native-layer.svg'), '<svg><style>@layer x{.a{fill:blue}}.a{stroke:red}</style><path class="a" d="M0 0h1v1z"/></svg>');
   fs.writeFileSync(path.join(project, 'native-layer-entry.js'), 'export { default as Icon } from "./app/native-layer.svg";');
