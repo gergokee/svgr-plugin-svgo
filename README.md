@@ -1,9 +1,11 @@
 # svgr-plugin-svgo
 
-An independent SVGR plugin that optimizes SVG markup with SVGO 4. Supports
-Node.js 20.9 or later and SVGR 8. This repository is not affiliated with SVGR.
-It was written from public SVGR and SVGO interface documentation and the
-project specification. This statement is not a legal or clean-room guarantee.
+An independent SVGR plugin that optimizes SVG markup with SVGO 4, plus a
+webpack-compatible loader for SVG React components. Supports Node.js 20.9 or
+later and SVGR 8. This repository is not affiliated with SVGR. The plugin was
+written from public SVGR and SVGO interface documentation and the project
+specification; the loader also uses public webpack and Babel documentation.
+This statement is not a legal or clean-room guarantee.
 
 **Release status:** not published. `private: true` prevents accidental npm
 publication until the maintainer explicitly authorizes a release and removes it.
@@ -23,6 +25,76 @@ const component = await transform(svgMarkup, {
 
 `transform.sync` is also supported. SVGR's `svgo: false` returns the input
 unchanged; it takes precedence over all optimization and validation.
+
+## Use the loader
+
+The same package also exports `svgr-plugin-svgo/loader`. After installation,
+it accepts SVG markup and emits a JavaScript module containing a React
+component; React must be installed by the consuming application. For example,
+this is a Next.js Turbopack rule:
+
+```js
+module.exports = {
+  turbopack: {
+    rules: {
+      '*.svg': {
+        loaders: [{
+          loader: 'svgr-plugin-svgo/loader',
+          options: {
+            exportType: 'named',
+            namedExport: 'ReactComponent',
+            svgoConfig: {},
+          },
+        }],
+        as: '*.js',
+      },
+    },
+  },
+};
+```
+
+Then `import { ReactComponent } from './icon.svg'`. For webpack 5, use the
+same loader object in a `module.rules` rule with `test: /\.svg$/i`. No npm
+override is needed for this loader. `svgoConfig: {}` uses this package's
+defaults and deliberately bypasses discovered SVGO config; omit it if you want
+discovery. A custom SVGO plugin list replaces those defaults. In SVGO 4, omit
+the old `preset-default` override `removeViewBox: false`: `removeViewBox` is no
+longer in the preset, and specifying that override causes an SVGO warning.
+
+### Loader options and compatibility
+
+The loader uses the SVGR core and JSX plugin and supports the applicable
+documented transformation options:
+
+- `exportType`, `namedExport`, `icon`, `native`, `dimensions`, `expandProps`,
+  `ref`, `memo`, `replaceAttrValues`, `svgProps`, `titleProp`, `descProp`,
+  `template`, `configFile`, `runtimeConfig`, `svgo` and `svgoConfig`.
+- `prettier` and `prettierConfig`; when runtime config is enabled, Prettier
+  config discovery is used unless `prettierConfig` is supplied explicitly.
+- `jsxRuntime: 'classic' | 'automatic' | 'classic-preact'` and `typescript`.
+  The built-in Babel step strips TypeScript types; it does not type-check.
+- `babel: false` returns JSX (or TSX with `typescript: true`) for a preceding
+  Babel or other suitable loader. `jsxRuntimeImport` requires `babel: false`
+  and a custom JSX transform. With Babel enabled, project Babel config is not
+  consulted; the loader uses its own JSX/TypeScript transforms.
+
+The loader handles the guide's `resourceQuery`/`issuer` patterns and can be
+chained before `url-loader` or `file-loader` in webpack. If an asset loader
+produces the default export, the component uses a named export (default
+`ReactComponent`, configurable with `namedExport`). The legacy asset loaders
+are deprecated; prefer webpack's asset modules with `resourceQuery` where
+possible. Chained asset loaders require a loader context with `fs.readFile`.
+The tested webpack and Turbopack configurations are in `test/bundlers.test.cjs`.
+
+This is not a promise of complete compatibility: the loader fixes its own SVGR
+plugin pipeline, so custom `plugins` are not accepted. CLI-only file-output
+options such as `outDir`, `index` and `filenameCase` do not apply and are
+rejected. It does not produce source maps. Turbopack loader options must be
+serializable, so functions such as custom templates must be supplied through
+an appropriate configuration file instead of the loader options. When runtime
+config is enabled, webpack caching is disabled to avoid persisting results
+without tracked configuration dependencies; restart the build after changing
+configuration files.
 
 ## Configuration and defaults
 
@@ -87,9 +159,9 @@ Run `npm install` and inspect the resulting lockfile and dependency tree. An
 override of a direct dependency is subject to npm's direct-dependency rules;
 see [npm overrides](https://docs.npmjs.com/cli/v11/configuring-npm/package-json#overrides).
 Review output and existing SVGO configurations before switching: this package
-is not guaranteed to be a behavior-identical replacement. The test suite checks
-a local packed tarball override, including webpack and Next.js 16 Turbopack;
-the registry alias example cannot be verified until publication.
+is not guaranteed to be a behavior-identical replacement. A local packed tarball
+override was tested previously; the registry alias example cannot be verified
+until publication. Current bundler tests use the independent loader directly.
 
 For Turbopack, loader options must be serializable: don't pass plugin functions
 in the loader configuration. An npm override lets the standard loader resolve
@@ -101,6 +173,7 @@ the replacement without passing one.
 npm ci
 npm test             # plugin and SVGR integration
 npm run test:bundlers # packs and installs an isolated consumer; requires network
+npm run test:legacy-optimizer # optional isolated behavior comparison; requires network
 npm audit
 npm audit --omit=dev
 npm pack --dry-run
@@ -108,3 +181,7 @@ npm pack --dry-run
 
 See [DEPENDENCIES.md](DEPENDENCIES.md) for the recorded license and audit
 snapshot. `npm pack` is local and does not publish. No publishing is automated.
+The optional legacy comparison runs the published legacy optimizer as a black
+box, without inspecting its source or tests. It checks equivalent behavior and
+the expected SVGO 3/4 title difference; exact output and prefixes may differ.
+It is not part of the ordinary test suite or runtime dependencies.

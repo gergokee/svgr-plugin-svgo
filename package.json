@@ -2,7 +2,7 @@
   "name": "svgr-plugin-svgo",
   "version": "0.1.0",
   "private": true,
-  "description": "An independent SVGR optimization plugin powered by SVGO",
+  "description": "An independent SVGR optimization plugin and webpack-compatible SVG loader",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -12,21 +12,27 @@
   "bugs": "https://github.com/gergokee/svgr-plugin-svgo/issues",
   "keywords": ["svgr", "svgo", "svg", "plugin", "react"],
   "main": "index.cjs",
-  "exports": "./index.cjs",
-  "files": ["index.cjs", "DEPENDENCIES.md"],
+  "exports": {
+    ".": "./index.cjs",
+    "./loader": "./loader.cjs"
+  },
+  "files": ["index.cjs", "loader.cjs", "DEPENDENCIES.md"],
   "engines": { "node": ">=20.9.0" },
   "scripts": {
-    "test": "node --test test/plugin.test.cjs test/svgr.test.cjs",
+    "test": "node --test test/plugin.test.cjs test/svgr.test.cjs test/loader.test.cjs",
     "test:bundlers": "node --test test/bundlers.test.cjs",
+    "test:legacy-optimizer": "node --test test/legacy-optimizer.test.cjs",
     "test:all": "npm test && npm run test:bundlers",
     "audit:production": "npm audit --omit=dev"
   },
   "dependencies": {
-    "cosmiconfig": "^9.0.0",
-    "svgo": "^4.1.0"
-  },
-  "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/plugin-transform-react-jsx": "^7.27.1",
+    "@babel/plugin-transform-typescript": "^7.27.1",
     "@svgr/core": "^8.1.0",
-    "@svgr/plugin-jsx": "^8.1.0"
+    "@svgr/plugin-jsx": "^8.1.0",
+    "cosmiconfig": "^9.0.0",
+    "prettier": "^3.6.2",
+    "svgo": "^4.1.0"
   }
 }
