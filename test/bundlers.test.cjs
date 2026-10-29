@@ -40,8 +40,8 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   fs.writeFileSync(path.join(project, 'types.cts'), `
     import plugin = require('svgr-plugin-svgo');
     import loader = require('svgr-plugin-svgo/loader');
-    const options: loader.LoaderOptions = { exportType: 'named', babelTargets: { ie: '11' } };
-    const result: string = plugin('<svg/>', { svgo: false });
+    const options: loader.LoaderOptions = { exportType: 'named', babelTargets: { ie: '11' }, nativeCss: 'warn' };
+    const result: string = plugin('<svg/>', { svgo: false, nativeCss: 'drop' });
     console.log(result, options);
   `);
   run(process.execPath, [path.join(project, 'node_modules', 'typescript', 'bin', 'tsc'),
@@ -77,7 +77,7 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   };
   const build = (cfg) => new Promise((resolve, reject) => webpack(cfg, (error, stats) => {
     if (error || stats.hasErrors()) reject(error || new Error(stats.toString({ errors: true })));
-    else resolve();
+    else resolve(stats);
   }));
   const react = require(require.resolve('react', { paths: [project] }));
   const { renderToStaticMarkup } = require(require.resolve('react-dom/server', { paths: [project] }));
@@ -146,6 +146,15 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   assert.match(nativeMarkup, /fill="red"/);
   assert.match(nativeMarkup, /M0 0h5v5H0zM6 0h5v5H6z/);
 
+  fs.writeFileSync(path.join(project, 'app', 'native-warn.svg'), '<svg style="isolation:isolate"><path d="M0 0h1v1z" fill="red"/></svg>');
+  fs.writeFileSync(path.join(project, 'native-warn-entry.js'), 'export { default as Icon } from "./app/native-warn.svg";');
+  const nativeWarnings = await build({ ...config, entry: './native-warn-entry.js', output: { ...config.output, filename: 'native-warn.js' },
+    resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader', options: { native: true, nativeCss: 'warn' } }] }] },
+  });
+  assert.match(nativeWarnings.toString({ warnings: true }), /unsupported CSS will be dropped/);
+  assert.match(render(require(path.join(project, 'dist', 'native-warn.js')).Icon), /fill="red"/);
+
   fs.writeFileSync(path.join(project, 'next.config.js'), `module.exports = {
     turbopack: { rules: { '*.svg': { loaders: [{ loader: 'svgr-plugin-svgo/loader', options: ${JSON.stringify(options)} }], as: '*.js' } } }
   };`);
@@ -153,7 +162,8 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   assertSvg(fs.readFileSync(path.join(project, '.next', 'server', 'app', 'index.html'), 'utf8'));
 
   // A real watch rebuild must pick up a changed config without restarting webpack.
-  const configFile = path.join(project, 'app', '.svgrrc');
+  fs.mkdirSync(path.join(project, '.config'));
+  const configFile = path.join(project, '.config', 'svgrrc');
   fs.writeFileSync(configFile, JSON.stringify({ icon: true }));
   fs.writeFileSync(path.join(project, 'watch.js'), 'export { default as Icon } from "./app/icon.svg";');
   const compiler = webpack({ ...config, mode: 'development', entry: './watch.js',

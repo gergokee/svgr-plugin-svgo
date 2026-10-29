@@ -24,6 +24,16 @@ test('SVGR native mode emits react-native-svg components', async () => {
   assert.match(result, /svg_[a-f0-9]{12}__/);
 });
 
+test('SVGR native CSS warning policy preserves convertible presentation attributes', async () => {
+  const input = '<svg style="isolation:isolate"><rect width="5" height="5" fill="red"/></svg>';
+  const warnings = [];
+  const state = { componentName: 'Icon', caller: { onNativeCssWarning: (warning) => warnings.push(warning) } };
+  const result = await transform(input, { ...options, native: true, nativeCss: 'warn' }, state);
+  assert.equal(warnings.length, 1);
+  assert.match(result, /fill="red"/);
+  assert.doesNotMatch(result, /isolation/);
+});
+
 test('SVGR svgo: false leaves original IDs intact', async () => {
   const result = await transform(svg, { ...options, svgo: false }, { componentName: 'Icon' });
   assert.match(result, /id="gradient"/);

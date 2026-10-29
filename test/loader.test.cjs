@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const loader = require('../loader.cjs');
 
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><defs><linearGradient id="paint"><stop stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs><path d="M0 0h10v10z" fill="url(#paint)"/></svg>';
@@ -13,6 +14,7 @@ function run(source, options = {}, resourcePath = '/project/icon.svg', sourceMap
   let cacheable;
   const dependencies = [];
   const missing = [];
+  const warnings = [];
   return new Promise((resolve, reject) => {
     const context = {
       resourcePath,
@@ -22,7 +24,8 @@ function run(source, options = {}, resourcePath = '/project/icon.svg', sourceMap
       cacheable: (value) => { cacheable = value; },
       addDependency: (file) => dependencies.push(file),
       addMissingDependency: (file) => missing.push(file),
-      async: () => (error, code, map) => error ? reject(error) : resolve({ code, map, cacheable, dependencies, missing }),
+      emitWarning: (warning) => warnings.push(warning),
+      async: () => (error, code, map) => error ? reject(error) : resolve({ code, map, cacheable, dependencies, missing, warnings }),
     };
     loader.call(context, source);
   });
@@ -66,9 +69,66 @@ test('rejects a discovered SVGR plugin pipeline with a clear error', async (t) =
   await assert.rejects(run(svg, {}, path.join(directory, 'icon.svg')), /unsupported option plugins in SVGR configuration/);
 });
 
+test('discovers and watches SVGR configuration in .config', async (t) => {
+  for (const [name, content] of [
+    ['svgrrc', 'icon: true'],
+    ['svgrrc.json', '{"icon":true}'],
+    ['svgrrc.yaml', 'icon: true'],
+    ['svgrrc.yml', 'icon: true'],
+    ['svgrrc.js', 'module.exports = { icon: true };'],
+    ['svgrrc.cjs', 'module.exports = { icon: true };'],
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loader-config-dir-'));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    fs.mkdirSync(path.join(directory, '.config'));
+    const configFile = path.join(directory, '.config', name);
+    fs.writeFileSync(configFile, content);
+    const result = await run(svg, {}, path.join(directory, 'icon.svg'));
+    assert.match(result.code, /"1em"/, name);
+    assert.ok(result.dependencies.includes(fs.realpathSync(configFile)), name);
+  }
+});
+
+test('rejects unsupported SVGR configs rather than ignoring them', async (t) => {
+  for (const name of [
+    '.svgrrc.ts', '.svgrrc.mjs', 'svgr.config.ts', 'svgr.config.mjs',
+    '.config/svgrrc.ts', '.config/svgrrc.mjs', '.config/svgrrc.cts', '.config/svgrrc.mts',
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loader-config-unsupported-'));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const configFile = path.join(directory, name);
+    fs.mkdirSync(path.dirname(configFile), { recursive: true });
+    fs.writeFileSync(configFile, 'export default { icon: true };');
+    const file = path.join(directory, 'icon.svg');
+    await assert.rejects(run(svg, {}, file), (error) => error.message.includes('unsupported SVGR config') && error.message.includes(name));
+    await assert.rejects(run(svg, { configFile }, file), /unsupported SVGR config/);
+    assert.match((await run(svg, { runtimeConfig: false }, file)).code, /viewBox/);
+  }
+});
+
+test('rejects ESM .js and asynchronous CommonJS SVGR configs clearly', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loader-config-modules-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'icon.svg');
+  fs.writeFileSync(path.join(directory, 'package.json'), '{"type":"module"}');
+  fs.writeFileSync(path.join(directory, 'svgr.config.js'), 'export default { icon: true };');
+  await assert.rejects(run(svg, {}, file), /unsupported SVGR config.*svgr\.config\.js/);
+  fs.rmSync(path.join(directory, 'svgr.config.js'));
+  fs.writeFileSync(path.join(directory, 'svgr.config.cjs'), 'module.exports = Promise.resolve({ icon: true });');
+  await assert.rejects(run(svg, {}, file), /must export a synchronous object/);
+});
+
 test('native mode emits react-native-svg imports', async () => {
   const { code } = await run(svg, { native: true, runtimeConfig: false });
   assert.match(code, /react-native-svg/);
+});
+
+test('native CSS warnings reach the loader context once', async () => {
+  const input = '<svg style="isolation:isolate"><rect width="5" height="5" style="mix-blend-mode:multiply"/></svg>';
+  const result = await run(input, { native: true, nativeCss: 'warn', runtimeConfig: false });
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0].message, /unsupported CSS will be dropped/);
+  assert.doesNotMatch(result.code, /isolation|mixBlendMode/);
 });
 
 test('babel: false leaves JSX and allows a custom JSX runtime import', async () => {
@@ -154,6 +214,21 @@ test('reloads changed SVGO and Prettier configurations between transforms', asyn
   const second = await run(svg, { babel: false }, file);
   assert.match(second.code, /viewBox/);
   assert.match(second.code, /from "react"/);
+});
+
+test('a process restart loads changed CommonJS Prettier configuration', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loader-prettier-js-update-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'icon.svg');
+  const config = path.join(directory, 'prettier.config.cjs');
+  fs.writeFileSync(config, 'module.exports = { singleQuote: true };');
+  assert.match((await run(svg, { babel: false }, file)).code, /from 'react'/);
+  fs.writeFileSync(config, 'module.exports = { singleQuote: false };');
+  const script = `const loader = require(${JSON.stringify(require.resolve('../loader.cjs'))});
+    loader.call({ resourcePath: ${JSON.stringify(file)}, getOptions: () => ({ babel: false }),
+      async: () => (error, code) => { if (error) throw error; process.stdout.write(code); }
+    }, ${JSON.stringify(svg)});`;
+  assert.match(execFileSync(process.execPath, ['-e', script], { encoding: 'utf8' }), /from "react"/);
 });
 
 test('emits source maps for generated JSX with and without built-in Babel', async () => {

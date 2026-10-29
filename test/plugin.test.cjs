@@ -88,3 +88,41 @@ test('native mode applies shared CSS and rejects rules that cannot be inlined', 
   assert.throws(() => plugin('<svg><path d="M0 0h1v1z" style="--custom:red"/></svg>',
     { native: true, runtimeConfig: false }), /could not be converted/);
 });
+
+test('native CSS policy handles exporter styles with explicit warnings or dropping', () => {
+  const examples = [
+    '<svg style="isolation:isolate"><rect width="5" height="5" fill="blue"/></svg>',
+    '<svg><rect width="5" height="5" style="mix-blend-mode:multiply;fill:blue"/></svg>',
+    '<svg><style>@font-face{font-family:Example;src:url(example.woff)}</style><text font-family="Example">Hi</text></svg>',
+  ];
+  for (const input of examples) {
+    assert.throws(() => plugin(input, { native: true, runtimeConfig: false }), /could not be/);
+    const warnings = [];
+    const state = { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } };
+    const warned = plugin(input, { native: true, nativeCss: 'warn', runtimeConfig: false }, state);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0].message, /unsupported CSS will be dropped/);
+    assert.doesNotMatch(warned, /<style|style="|mix-blend-mode|isolation|@font-face/);
+    warnings.length = 0;
+    const dropped = plugin(input, { native: true, nativeCss: 'drop', runtimeConfig: false }, state);
+    assert.equal(warnings.length, 0);
+    assert.equal(dropped, warned);
+  }
+  const mixed = plugin(examples[1], { native: true, nativeCss: 'drop', runtimeConfig: false });
+  assert.match(mixed, /fill="(?:blue|#00f)"/);
+  assert.throws(() => plugin(examples[0], { native: true, nativeCss: 'ignore' }), /nativeCss must be/);
+});
+
+test('native CSS warn mode emits a Node warning without a caller callback', () => {
+  const original = process.emitWarning;
+  const warnings = [];
+  try {
+    process.emitWarning = (warning) => warnings.push(warning);
+    plugin('<svg style="isolation:isolate"><path d="M0 0h1v1z"/></svg>',
+      { native: true, nativeCss: 'warn', runtimeConfig: false });
+  } finally {
+    process.emitWarning = original;
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].message, /unsupported CSS will be dropped/);
+});

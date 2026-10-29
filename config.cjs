@@ -1,12 +1,15 @@
 'use strict';
 
-const { existsSync, realpathSync } = require('node:fs');
+const { existsSync, readFileSync, realpathSync } = require('node:fs');
 const { dirname, isAbsolute, join, relative, resolve, sep } = require('node:path');
-const { cosmiconfigSync } = require('cosmiconfig');
+const { cosmiconfigSync, defaultLoadersSync } = require('cosmiconfig');
 
+const rcExtensions = ['', '.json', '.yaml', '.yml', '.js', '.ts', '.cjs', '.mjs', '.cts', '.mts'];
 const svgrPlaces = [
-  'package.json', '.svgrrc', '.svgrrc.json', '.svgrrc.yaml', '.svgrrc.yml', '.svgrrc.js', '.svgrrc.cjs',
-  'svgr.config.js', 'svgr.config.cjs',
+  'package.json',
+  ...rcExtensions.map((ext) => `.svgrrc${ext}`),
+  ...rcExtensions.map((ext) => `.config/svgrrc${ext}`),
+  ...['.js', '.ts', '.cjs', '.mjs', '.cts', '.mts'].map((ext) => `svgr.config${ext}`),
 ];
 const watchPlaces = [
   ...svgrPlaces, '.svgo.json', '.svgo.yaml', '.svgo.yml', '.svgo.js', '.svgo.cjs', '.svgorc',
@@ -47,12 +50,40 @@ function registerConfigFiles(context, options) {
 
 function resolveSvgrConfig(options, filePath) {
   if (options.runtimeConfig === false) return null;
-  const explorer = cosmiconfigSync('svgr', { searchPlaces: svgrPlaces, cache: false });
-  if (options.configFile) return explorer.load(resolve(options.configFile))?.config ?? null;
+  const unsupported = (file) => {
+    throw new Error(`svgr-plugin-svgo/loader: unsupported SVGR config ${file}; use JSON, YAML, or synchronous CommonJS (.cjs)`);
+  };
+  const loadJs = (file, content) => {
+    let directory = dirname(file);
+    while (true) {
+      const packageFile = join(directory, 'package.json');
+      if (existsSync(packageFile)) {
+        if (JSON.parse(readFileSync(packageFile, 'utf8')).type === 'module') return unsupported(file);
+        break;
+      }
+      const parent = dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+    return defaultLoadersSync['.js'](file, content);
+  };
+  const explorer = cosmiconfigSync('svgr', {
+    searchPlaces: svgrPlaces, cache: false,
+    loaders: { '.js': loadJs, '.mjs': unsupported, '.ts': unsupported, '.cts': unsupported, '.mts': unsupported },
+  });
+  const readResult = (result) => {
+    if (!result) return null;
+    const config = result.config;
+    if (config == null || typeof config !== 'object' || Array.isArray(config) || typeof config.then === 'function') {
+      throw new Error(`svgr-plugin-svgo/loader: SVGR config ${result.filepath} must export a synchronous object`);
+    }
+    return config;
+  };
+  if (options.configFile) return readResult(explorer.load(resolve(options.configFile)));
   let directory = dirname(resolve(filePath));
   while (true) {
     const result = explorer.search(directory);
-    if (result) return result.config;
+    if (result) return readResult(result);
     const parent = dirname(directory);
     if (parent === directory) return null;
     directory = parent;

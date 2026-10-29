@@ -80,12 +80,16 @@ module.exports = function svgComponentLoader(source) {
       plugins: [optimizer, jsxPlugin],
     }, {
       filePath: this.resourcePath,
-      caller: { name: 'svgr-plugin-svgo/loader', projectRoot: this.rootContext, previousExport: previousExport && asEsModule(previousExport) },
+      caller: {
+        name: 'svgr-plugin-svgo/loader',
+        projectRoot: this.rootContext,
+        previousExport: previousExport && asEsModule(previousExport),
+        onNativeCssWarning: typeof this.emitWarning === 'function' ? (warning) => this.emitWarning(warning) : undefined,
+      },
     });
     if (effectiveOptions.prettier !== false) {
-      if (effectiveOptions.runtimeConfig !== false) await prettier.clearConfigCache();
       const discovered = effectiveOptions.prettierConfig != null || effectiveOptions.runtimeConfig === false
-        ? null : await prettier.resolveConfig(this.resourcePath);
+        ? null : await prettier.resolveConfig(this.resourcePath, { useCache: false });
       jsx = await prettier.format(jsx, {
         ...(effectiveOptions.prettierConfig ?? discovered ?? {}),
         parser: effectiveOptions.typescript ? 'typescript' : 'babel',

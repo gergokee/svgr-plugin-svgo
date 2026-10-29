@@ -7,6 +7,10 @@ written from public SVGR and SVGO interface documentation and the project
 specification; the loader also uses public webpack and Babel documentation.
 This statement is not a legal or clean-room guarantee.
 
+The plugin and loader currently ship as one package, so plugin-only consumers
+also install the loader's Babel, Prettier and SVGR dependencies. Splitting them
+into separate packages is a possible future change.
+
 **Release status:** not published. `private: true` prevents accidental npm
 publication until the maintainer explicitly authorizes a release and removes it.
 
@@ -69,6 +73,8 @@ documented transformation options:
 - `exportType`, `namedExport`, `icon`, `native`, `dimensions`, `expandProps`,
   `ref`, `memo`, `replaceAttrValues`, `svgProps`, `titleProp`, `descProp`,
   `template`, `configFile`, `runtimeConfig`, `svgo` and `svgoConfig`.
+- `nativeCss: 'error' | 'warn' | 'drop'` controls unconverted native CSS;
+  `error` is the default (see below).
 - `prettier` and `prettierConfig`; when runtime config is enabled, Prettier
   config discovery is used unless `prettierConfig` is supplied explicitly.
 - `jsxRuntime: 'classic' | 'automatic' | 'classic-preact'` and `typescript`.
@@ -100,13 +106,37 @@ templates must be supplied through an appropriate configuration file instead
 of loader options. With runtime config enabled, caching is disabled and config
 files within the bundler's project root are tracked as watch dependencies.
 Configuration outside the root, imported JS configuration dependencies and
-some bundler-specific watch behavior may still require a restart. Webpack watch
-rebuilds are tested; Turbopack production builds are tested separately.
+Prettier JavaScript configurations may still require a restart because Node
+caches loaded modules. Some bundler-specific watch behavior may also require a
+restart. Webpack watch rebuilds are tested; Turbopack production builds are
+tested separately.
+Caching remains disabled because configurations and custom plugins can depend
+on untracked files or process state. Prettier is resolved without its cache,
+rather than clearing its global cache for every SVG.
 
 TypeScript declarations are provided for the plugin and loader subpath. The
 loader subpath's `LoaderOptions` type includes `babelTargets`.
 
 ## Configuration and defaults
+
+### SVGR loader configuration
+
+Unless `runtimeConfig: false`, the loader searches upward from the SVG's
+directory, using the first nonempty config in the nearest directory. Within
+each directory it checks, in this order:
+
+1. The `svgr` key in `package.json`.
+2. `.svgrrc` with no extension or with `.json`, `.yaml`, `.yml`, `.js` or `.cjs`.
+3. `.config/svgrrc` with the same extensions.
+4. `svgr.config.js` or `svgr.config.cjs`.
+
+CommonJS files must export a synchronous object. `.js` files in an ESM package,
+and `.mjs`, `.ts`, `.cts` and `.mts` variants of these names, are detected in
+search order but rejected with an actionable error instead of being silently
+ignored. Convert them to `.cjs`, JSON or YAML. An explicit `configFile` follows
+the same rules; explicit loader options override the discovered options.
+
+### SVGO configuration
 
 `svgoConfig` takes precedence over discovered configuration. If `runtimeConfig`
 is not `false`, the plugin searches from the directory of `state.filePath`, or
@@ -128,7 +158,19 @@ then `prefixIds`. SVGO 4 preserves `viewBox` by default. When `native: true`,
 CSS is inlined even when selectors match multiple elements, and presentation
 styles are converted to SVG attributes before style elements are removed.
 Remaining styles, such as unsupported media queries, pseudo-classes or CSS
-properties, cause an error rather than being silently dropped. This does not
+properties, cause an error rather than being silently dropped by default.
+For native icon sets containing unsupported design-tool styles, set:
+
+```js
+options: { native: true, nativeCss: 'warn' }
+```
+
+`nativeCss: 'warn'` drops remaining unconverted stylesheet and inline CSS and
+emits one warning per SVG through the loader, or as a Node warning when the
+plugin is used directly. `nativeCss: 'drop'` drops it without a warning;
+`nativeCss: 'error'` is the default. Dropping CSS can change rendering,
+including font and blend effects, so review icons on the target platform. With
+`svgo: false` the optimizer and these safeguards are bypassed. This does not
 guarantee that every SVG/CSS feature is supported by react-native-svg; test
 the result on your target platform. SVGR's JSX plugin handles native element
 conversion and removal of unsupported elements.

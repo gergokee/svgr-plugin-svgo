@@ -39,26 +39,43 @@ const validateRoot = {
   }),
 };
 
-const validateNativeStyles = {
-  name: 'validateNativeStyles',
-  fn: () => ({
-    element: {
-      enter(node) {
-        if (node.name === 'style' && node.children.some((child) => child.value?.trim())) {
-          throw new Error('Native SVG contains CSS that could not be inlined safely; remove or manually convert the remaining styles');
-        }
-        if (node.attributes?.style?.trim()) {
-          throw new Error('Native SVG contains inline CSS that could not be converted to presentation attributes');
-        }
+function nativeStylePolicy(mode, state) {
+  let warned = false;
+  const report = (message) => {
+    if (mode === 'error') throw new Error(message);
+    if (mode === 'warn' && !warned) {
+      const warning = new Error(`svgr-plugin-svgo: ${message}; unsupported CSS will be dropped and appearance may change`);
+      if (state.caller?.onNativeCssWarning) state.caller.onNativeCssWarning(warning);
+      else process.emitWarning(warning);
+      warned = true;
+    }
+  };
+  return {
+    name: 'nativeStylePolicy',
+    fn: () => ({
+      element: {
+        enter(node) {
+          if (node.name === 'style' && node.children.some((child) => child.value?.trim())) {
+            report('Native SVG contains CSS that could not be inlined safely');
+          }
+          if (node.attributes?.style?.trim()) {
+            report('Native SVG contains inline CSS that could not be converted to presentation attributes');
+            delete node.attributes.style;
+          }
+        },
       },
-    },
-  }),
-};
+    }),
+  };
+}
 
 function svgrPluginSvgo(source, options = {}, state = {}) {
   if (options.svgo === false) return source;
   if (typeof source !== 'string') {
     throw new TypeError('svgr-plugin-svgo: SVG input must be a string');
+  }
+  const nativeCss = options.nativeCss === undefined ? 'error' : options.nativeCss;
+  if (!['error', 'warn', 'drop'].includes(nativeCss)) {
+    throw new TypeError('svgr-plugin-svgo: nativeCss must be error, warn, or drop');
   }
 
   const filePath = state.filePath;
@@ -76,7 +93,7 @@ function svgrPluginSvgo(source, options = {}, state = {}) {
     options.native
       ? { name: 'preset-default', params: { overrides: { inlineStyles: { onlyMatchedOnce: false } } } }
       : 'preset-default',
-    ...(options.native ? ['convertStyleToAttrs', validateNativeStyles, 'removeStyleElement'] : []),
+    ...(options.native ? ['convertStyleToAttrs', nativeStylePolicy(nativeCss, state), 'removeStyleElement'] : []),
     { name: 'prefixIds', params: { prefix } },
   ];
   const plugins = config.plugins ?? defaultPlugins;

@@ -7,6 +7,7 @@ declare namespace svgComponentLoader {
   interface LoaderOptions extends Omit<Config, 'plugins'> {
     babel?: boolean;
     babelTargets?: string | string[] | Record<string, string | boolean>;
+    nativeCss?: 'error' | 'warn' | 'drop';
   }
   interface LoaderContext {
     resourcePath: string;
