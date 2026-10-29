@@ -11,20 +11,24 @@ The plugin and loader currently ship as one package, so plugin-only consumers
 also install the loader's Babel, Prettier and SVGR dependencies. Splitting them
 into separate packages is a possible future change.
 
-**Release status:** not published. `private: true` prevents accidental npm
-publication until the maintainer explicitly authorizes a release and removes it.
-
 ## Use with SVGR
 
-After the package is published, install it with `@svgr/core` and
-`@svgr/plugin-jsx`, then list it before the JSX plugin:
+Install it with `@svgr/core` and `@svgr/plugin-jsx`:
+
+```sh
+npm install --save-dev svgr-plugin-svgo @svgr/core @svgr/plugin-jsx
+```
+
+Then list it before the JSX plugin:
 
 ```js
 const { transform } = require('@svgr/core');
 
-const component = await transform(svgMarkup, {
-  plugins: ['svgr-plugin-svgo', '@svgr/plugin-jsx'],
-}, { filePath: 'icons/example.svg', componentName: 'Example' });
+async function makeComponent(svgMarkup) {
+  return transform(svgMarkup, {
+    plugins: ['svgr-plugin-svgo', '@svgr/plugin-jsx'],
+  }, { filePath: 'icons/example.svg', componentName: 'Example' });
+}
 ```
 
 `transform.sync` is also supported. SVGR's `svgo: false` returns the input
@@ -244,8 +248,8 @@ or plugins may need changes; optimization output can differ. See the
 
 ## Replacing the default SVGR optimization dependency
 
-Once this package is published, an npm **root** `package.json` can substitute
-it for the transitive dependency used by compatible SVGR tooling:
+An npm **root** `package.json` can substitute this package for the transitive
+dependency used by compatible SVGR tooling:
 
 ```json
 {
@@ -260,8 +264,8 @@ override of a direct dependency is subject to npm's direct-dependency rules;
 see [npm overrides](https://docs.npmjs.com/cli/v11/configuring-npm/package-json#overrides).
 Review output and existing SVGO configurations before switching: this package
 is not guaranteed to be a behavior-identical replacement. A local packed tarball
-override was tested previously; the registry alias example cannot be verified
-until publication. Current bundler tests use the independent loader directly.
+override was tested previously. Current bundler tests use the independent
+loader directly; verify registry alias resolution in your own dependency tree.
 
 For Turbopack, loader options must be serializable: don't pass plugin functions
 in the loader configuration. An npm override lets the standard loader resolve
