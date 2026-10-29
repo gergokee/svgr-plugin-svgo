@@ -215,7 +215,9 @@ test('native mode inlines structural selectors with a leading style element', ()
   const input = (css) => `<svg><style>${css}</style><path d="M0 0h1v1z"/><path class="b" d="M2 0h1v1z"/></svg>`;
   for (const css of [
     'path:not(.b){fill:red}', 'path:nth-child(2){fill:red}', '@charset "UTF-8";path:nth-child(2){fill:red}',
-    'path:first-child,path:nth-child(2){fill:red}',
+    'path:first-child,path:nth-child(2){fill:red}', 'path:is(:nth-child(2)){fill:red}',
+    'path:where(:nth-child(2)){fill:red}', 'path:nth-last-child(2){fill:red}',
+    'path:first-of-type{fill:red}', 'path:nth-of-type(1){fill:red}', 'path:nth-last-of-type(2){fill:red}',
   ]) {
     for (const svgoConfig of [undefined, { plugins: [] }]) {
       const warnings = [];
@@ -251,6 +253,8 @@ test('native CSS rejects dynamic pseudo-classes, pseudo-elements and unsupported
   const cases = [
     '.a:hover{fill:blue}', '.a:focus{fill:blue}', '.a:active{fill:blue}', '.a:visited{fill:blue}',
     '.a:focus-visible{fill:blue}', '.a:not(:hover){fill:blue}', '.a::before{fill:blue}', '.a:before{fill:blue}',
+    '.a:popover-open{fill:blue}', '.a:autofill{fill:blue}', '.a:is(:autofill){fill:blue}',
+    '.a:not(:popover-open){fill:blue}', '.a:future-state{fill:blue}',
     '@media (min-width:1px){.a{fill:blue}}', '@supports (display:grid){.a{fill:blue}}',
     '@font-face{font-family:Example;src:url(example.woff)}', '@keyframes spin{from{opacity:0}to{opacity:1}}',
     '@import url(example.css);',
@@ -263,6 +267,23 @@ test('native CSS rejects dynamic pseudo-classes, pseudo-elements and unsupported
       { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } });
     assert.equal(warnings.length, 1, css);
     assert.match(output, /fill="red"/, css);
+  }
+});
+
+test('native CSS catches an unknown at-rule sharing a class with a static rule', () => {
+  for (const layer of ['@layer x{.a{fill:blue}}', '@layer x{.a:hover{fill:blue}}']) {
+    const input = `<svg><style>${layer}.a{stroke:red}</style><path class="a" d="M0 0h1v1z"/></svg>`;
+    for (const svgoConfig of [undefined, { plugins: [] }]) {
+      const options = { native: true, runtimeConfig: false, svgoConfig };
+      assert.throws(() => plugin(input, options), /could not be inlined safely/);
+      const warnings = [];
+      const warned = plugin(input, { ...options, nativeCss: 'warn' },
+        { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } });
+      assert.equal(warnings.length, 1);
+      assert.match(warned, /stroke="red"/);
+      assert.doesNotMatch(warned, /fill="(?:blue|#00f)"|@layer/);
+      assert.equal(plugin(input, { ...options, nativeCss: 'drop' }), warned);
+    }
   }
 });
 

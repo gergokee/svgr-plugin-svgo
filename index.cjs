@@ -20,19 +20,17 @@ const validateRoot = {
   }),
 };
 
-const dynamicPseudoClasses = new Set([
-  'hover', 'focus', 'focus-visible', 'focus-within', 'active', 'visited', 'link', 'any-link',
-  'target', 'target-within', 'checked', 'indeterminate', 'disabled', 'enabled', 'valid', 'invalid',
-  'user-valid', 'user-invalid', 'in-range', 'out-of-range', 'placeholder-shown', 'open', 'playing',
-  'paused', 'fullscreen', 'picture-in-picture', 'before', 'after', 'first-line', 'first-letter',
+const staticPseudoClasses = new Set([
+  'not', 'is', 'where', 'root', 'empty',
+  'nth-child', 'nth-last-child', 'nth-of-type', 'nth-last-of-type',
+  'first-child', 'last-child', 'only-child', 'first-of-type', 'last-of-type', 'only-of-type',
 ]);
-const unsupportedAtRules = new Set(['media', 'supports', 'font-face', 'keyframes', '-webkit-keyframes', 'import']);
 
 function isDynamicSelector(selector) {
   let dynamic = false;
   cssTree.walk(selector, (item) => {
     if (item.type === 'PseudoElementSelector' ||
-      (item.type === 'PseudoClassSelector' && dynamicPseudoClasses.has(item.name?.toLowerCase()))) dynamic = true;
+      (item.type === 'PseudoClassSelector' && !staticPseudoClasses.has(item.name?.toLowerCase()))) dynamic = true;
   });
   return dynamic;
 }
@@ -73,7 +71,7 @@ function nativeStylePolicies(mode, state) {
               try {
                 ast = cssTree.parse(css, { onParseError: () => { parseFailed = true; } });
                 cssTree.walk(ast, (item, listItem, list) => {
-                  if (item.type === 'Atrule' && unsupportedAtRules.has(item.name?.toLowerCase())) {
+                  if (item.type === 'Atrule' && item.name?.toLowerCase() !== 'charset') {
                     unsupported = true;
                     if (list && listItem) removals.push(() => list.remove(listItem));
                   }

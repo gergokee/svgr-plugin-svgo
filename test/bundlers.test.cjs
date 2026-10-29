@@ -161,6 +161,19 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   assert.match(renderedPaths[0], /fill="red"/);
   assert.doesNotMatch(renderedPaths[1], /fill="red"/);
 
+  fs.writeFileSync(path.join(project, 'app', 'native-layer.svg'), '<svg><style>@layer x{.a{fill:blue}}.a{stroke:red}</style><path class="a" d="M0 0h1v1z"/></svg>');
+  fs.writeFileSync(path.join(project, 'native-layer-entry.js'), 'export { default as Icon } from "./app/native-layer.svg";');
+  const nativeLayer = await build({ ...config, entry: './native-layer-entry.js',
+    output: { ...config.output, filename: 'native-layer.js' },
+    resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader',
+      options: { native: true, nativeCss: 'warn', svgoConfig: { plugins: [] } } }] }] },
+  });
+  assert.match(nativeLayer.toString({ warnings: true }), /unsupported CSS will be dropped/);
+  const layerMarkup = render(require(path.join(project, 'dist', 'native-layer.js')).Icon);
+  assert.match(layerMarkup, /stroke="red"/);
+  assert.doesNotMatch(layerMarkup, /fill="(?:blue|#00f)"/);
+
   fs.writeFileSync(path.join(project, 'app', 'native-warn.svg'), '<svg style="isolation:isolate"><path d="M0 0h1v1z" fill="red"/></svg>');
   fs.writeFileSync(path.join(project, 'native-warn-entry.js'), 'export { default as Icon } from "./app/native-warn.svg";');
   const nativeWarnings = await build({ ...config, entry: './native-warn-entry.js', output: { ...config.output, filename: 'native-warn.js' },
