@@ -31,6 +31,7 @@
     "@babel/core": "^7.29.7",
     "@babel/plugin-transform-react-jsx": "^7.27.1",
     "@babel/plugin-transform-typescript": "^7.27.1",
+    "@babel/parser": "^7.29.7",
     "@babel/preset-env": "^7.29.7",
     "@svgr/core": "^8.1.0",
     "@svgr/plugin-jsx": "^8.1.0",

@@ -166,16 +166,20 @@ CSS is inlined even when selectors match multiple elements, and presentation
 styles are converted to SVG attributes before style elements are removed.
 Remaining styles, such as unsupported media queries, pseudo-classes or CSS
 properties, cause an error rather than being silently dropped by default. A
-preflight check also rejects pseudo-selectors and at-rules before optimization,
-including ones that SVGO might otherwise discard; this is conservative and may
-reject selectors that would not affect the native rendering.
+preflight check detects interactive pseudo-classes such as `:hover` and
+`:focus`, pseudo-elements, and at-rules such as `@media`, `@supports`,
+`@font-face`, `@keyframes` and `@import` before optimization. Structural
+selectors such as `:not`, `:nth-child` and `:first-child` can be inlined by
+SVGO; unmatched selectors and `@charset` can be discarded without a warning.
+Other CSS that cannot be evaluated or inlined may still be rejected.
 For native icon sets containing unsupported design-tool styles, set:
 
 ```js
 options: { native: true, nativeCss: 'warn' }
 ```
 
-`nativeCss: 'warn'` drops remaining unconverted stylesheet and inline CSS and
+`nativeCss: 'warn'` drops unsupported selectors and at-rules before inlining,
+as well as remaining unconverted stylesheet and inline CSS, and
 emits one warning per SVG through the loader, or as a Node warning when the
 plugin is used directly. `nativeCss: 'drop'` drops it without a warning;
 `nativeCss: 'error'` is the default. Dropping CSS can change rendering,

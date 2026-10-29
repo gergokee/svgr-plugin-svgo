@@ -137,6 +137,18 @@ test('rejects ESM syntax in an untyped .js SVGR config consistently', async (t) 
   await assert.rejects(run(svg, {}, path.join(directory, 'icon.svg')), /unsupported SVGR config.*svgr\.config\.js/);
 });
 
+test('preserves ordinary CommonJS SVGR config syntax errors', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loader-syntax-error-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const config = path.join(directory, 'svgr.config.js');
+  const file = path.join(directory, 'icon.svg');
+  fs.writeFileSync(config, 'module.exports = { icon: ; };');
+  await assert.rejects(run(svg, {}, file),
+    (error) => error instanceof SyntaxError && !error.message.includes('unsupported SVGR config'));
+  fs.writeFileSync(config, '// export default is just a comment\nmodule.exports = { icon: true };');
+  assert.match((await run(svg, {}, file)).code, /"1em"/);
+});
+
 test('native mode emits react-native-svg imports', async () => {
   const { code } = await run(svg, { native: true, runtimeConfig: false });
   assert.match(code, /react-native-svg/);

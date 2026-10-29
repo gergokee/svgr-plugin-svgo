@@ -71,11 +71,24 @@ function createConfigExplorer(name, places, prefix) {
       if (parent === directory) break;
       directory = parent;
     }
+    if (/\b(?:import|export)\b/.test(content)) {
+      let ast;
+      try {
+        // Parsing only candidate files prevents comments or strings from being
+        // mistaken for ESM, without obscuring ordinary CommonJS syntax errors.
+        ast = require('@babel/parser').parse(content, { sourceType: 'module' });
+      } catch {
+        // Let the CommonJS loader report the original syntax error below.
+      }
+      if (ast?.program.body.some((node) => node.type === 'ImportDeclaration' || node.type.startsWith('Export'))) {
+        return unsupported(file);
+      }
+    }
     let config;
     try {
       config = defaultLoadersSync['.js'](file, content);
     } catch (error) {
-      if (error.code === 'ERR_REQUIRE_ESM' || error.code === 'ERR_REQUIRE_ASYNC_MODULE' || error instanceof SyntaxError) {
+      if (error.code === 'ERR_REQUIRE_ESM' || error.code === 'ERR_REQUIRE_ASYNC_MODULE') {
         return unsupported(file);
       }
       throw error;

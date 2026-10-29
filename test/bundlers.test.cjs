@@ -146,6 +146,21 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   const nativeMarkup = render(require(path.join(project, 'dist', 'native.js')).Icon);
   assert.equal((nativeMarkup.match(/fill="red"/g) || []).length, 2);
 
+  fs.writeFileSync(path.join(project, 'app', 'native-structural.svg'), '<svg><style>path:nth-child(2){fill:red}</style><path d="M0 0h1v1z"/><path d="M2 0h1v1z"/></svg>');
+  fs.writeFileSync(path.join(project, 'native-structural-entry.js'), 'export { default as Icon } from "./app/native-structural.svg";');
+  const nativeStructural = await build({ ...config, entry: './native-structural-entry.js',
+    output: { ...config.output, filename: 'native-structural.js' },
+    resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader',
+      options: { native: true, nativeCss: 'warn', svgoConfig: { plugins: [] } } }] }] },
+  });
+  assert.equal(nativeStructural.hasWarnings(), false);
+  const structuralMarkup = render(require(path.join(project, 'dist', 'native-structural.js')).Icon);
+  const renderedPaths = structuralMarkup.match(/<path\b[^>]*\/?\s*>/g);
+  assert.equal(renderedPaths.length, 2);
+  assert.match(renderedPaths[0], /fill="red"/);
+  assert.doesNotMatch(renderedPaths[1], /fill="red"/);
+
   fs.writeFileSync(path.join(project, 'app', 'native-warn.svg'), '<svg style="isolation:isolate"><path d="M0 0h1v1z" fill="red"/></svg>');
   fs.writeFileSync(path.join(project, 'native-warn-entry.js'), 'export { default as Icon } from "./app/native-warn.svg";');
   const nativeWarnings = await build({ ...config, entry: './native-warn-entry.js', output: { ...config.output, filename: 'native-warn.js' },

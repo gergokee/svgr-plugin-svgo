@@ -2,7 +2,7 @@
 
 const { createHash } = require('node:crypto');
 const { relative, resolve, sep } = require('node:path');
-const { optimize } = require('svgo');
+const { optimize, querySelectorAll, mapNodesToParents } = require('svgo');
 const cssTree = require('css-tree');
 const { resolveSvgoConfig, validateConfig } = require('./config.cjs');
 
@@ -20,8 +20,26 @@ const validateRoot = {
   }),
 };
 
+const dynamicPseudoClasses = new Set([
+  'hover', 'focus', 'focus-visible', 'focus-within', 'active', 'visited', 'link', 'any-link',
+  'target', 'target-within', 'checked', 'indeterminate', 'disabled', 'enabled', 'valid', 'invalid',
+  'user-valid', 'user-invalid', 'in-range', 'out-of-range', 'placeholder-shown', 'open', 'playing',
+  'paused', 'fullscreen', 'picture-in-picture', 'before', 'after', 'first-line', 'first-letter',
+]);
+const unsupportedAtRules = new Set(['media', 'supports', 'font-face', 'keyframes', '-webkit-keyframes', 'import']);
+
+function isDynamicSelector(selector) {
+  let dynamic = false;
+  cssTree.walk(selector, (item) => {
+    if (item.type === 'PseudoElementSelector' ||
+      (item.type === 'PseudoClassSelector' && dynamicPseudoClasses.has(item.name?.toLowerCase()))) dynamic = true;
+  });
+  return dynamic;
+}
+
 function nativeStylePolicies(mode, state) {
   let warned = false;
+  const unmatchedSelectors = new Set();
   const report = (message) => {
     if (mode === 'error') throw new Error(message);
     if (mode === 'warn' && !warned) {
@@ -40,25 +58,62 @@ function nativeStylePolicies(mode, state) {
   return {
     preflight: {
       name: 'preflightNativeStyles',
-      fn: () => ({
-        element: {
-          enter(node) {
-            if (node.name !== 'style') return;
-            const css = node.children.map((child) => child.value || '').join('');
-            if (!css.trim()) return;
-            let unsupported = false;
-            try {
-              const ast = cssTree.parse(css, { onParseError: () => { unsupported = true; } });
-              cssTree.walk(ast, (item) => {
-                if (['Atrule', 'PseudoClassSelector', 'PseudoElementSelector'].includes(item.type)) unsupported = true;
-              });
-            } catch {
-              unsupported = true;
-            }
-            if (unsupported) report('Native SVG contains CSS that could not be inlined safely');
+      fn: (root) => {
+        const parents = mapNodesToParents(root);
+        return {
+          element: {
+            enter(node) {
+              if (node.name !== 'style') return;
+              const css = node.children.map((child) => child.value || '').join('');
+              if (!css.trim()) return;
+              let unsupported = false;
+              let parseFailed = false;
+              let ast;
+              const removals = [];
+              try {
+                ast = cssTree.parse(css, { onParseError: () => { parseFailed = true; } });
+                cssTree.walk(ast, (item, listItem, list) => {
+                  if (item.type === 'Atrule' && unsupportedAtRules.has(item.name?.toLowerCase())) {
+                    unsupported = true;
+                    if (list && listItem) removals.push(() => list.remove(listItem));
+                  }
+                  if (item.type === 'Rule' && item.prelude?.type === 'SelectorList') {
+                    const dynamic = [];
+                    let total = 0;
+                    item.prelude.children.forEach((part, partItem, parts) => {
+                      total += 1;
+                      const selector = cssTree.generate(part);
+                      try {
+                        if (querySelectorAll(root, selector, parents).length === 0) unmatchedSelectors.add(selector);
+                      } catch {
+                        // If the selector cannot be evaluated, the later safety check remains conservative.
+                      }
+                      if (isDynamicSelector(part)) dynamic.push(() => parts.remove(partItem));
+                    });
+                    if (dynamic.length) {
+                      unsupported = true;
+                      if (dynamic.length === total && list && listItem) removals.push(() => list.remove(listItem));
+                      else removals.push(...dynamic);
+                    }
+                  }
+                });
+              } catch {
+                parseFailed = true;
+              }
+              if (parseFailed || unsupported) {
+                report('Native SVG contains CSS that could not be inlined safely');
+                if (mode !== 'error') {
+                  if (parseFailed) node.children = [{ type: 'text', value: '' }];
+                  else {
+                    removals.forEach((remove) => remove());
+                    node.children = [{ type: 'text', value: cssTree.generate(ast) }];
+                  }
+                }
+              }
+            },
           },
-        },
-      }),
+        };
+      },
     },
     validateInline: {
       name: 'validateNativeInlineStyles',
@@ -69,8 +124,23 @@ function nativeStylePolicies(mode, state) {
       fn: () => ({
         element: {
           enter(node) {
-            if (node.name === 'style' && node.children.some((child) => child.value?.trim())) {
-              report('Native SVG contains CSS that could not be inlined safely');
+            if (node.name === 'style') {
+              const css = node.children.map((child) => child.value || '').join('');
+              if (css.trim()) {
+                let inert = true;
+                try {
+                  const ast = cssTree.parse(css, { onParseError: () => { inert = false; } });
+                  ast.children.forEach((item) => {
+                    const charset = item.type === 'Atrule' && item.name?.toLowerCase() === 'charset';
+                    const unmatched = item.type === 'Rule' && item.prelude?.type === 'SelectorList' &&
+                      item.prelude.children.toArray().every((selector) => unmatchedSelectors.has(cssTree.generate(selector)));
+                    if (!charset && !unmatched) inert = false;
+                  });
+                } catch {
+                  inert = false;
+                }
+                if (!inert) report('Native SVG contains CSS that could not be inlined safely');
+              }
             }
             checkInline(node);
           },

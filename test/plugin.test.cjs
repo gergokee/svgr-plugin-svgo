@@ -128,6 +128,17 @@ test('rejects an asynchronous CommonJS .js SVGO config', (t) => {
   assert.throws(() => plugin(svg, {}, { filePath: path.join(root, 'icon.svg') }), /SVGO config.*must export a synchronous object/);
 });
 
+test('preserves ordinary CommonJS SVGO config syntax errors', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'svgo-syntax-error-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const config = path.join(root, 'svgo.config.js');
+  fs.writeFileSync(config, 'module.exports = { multipass: ; };');
+  assert.throws(() => plugin(svg, {}, { filePath: path.join(root, 'icon.svg') }),
+    (error) => error instanceof SyntaxError && !error.message.includes('unsupported SVGO config'));
+  fs.writeFileSync(config, '// export default is just a comment\nmodule.exports = { plugins: [] };');
+  assert.match(plugin(svg, {}, { filePath: path.join(root, 'icon.svg') }), /viewBox/);
+});
+
 test('passes filePath to custom SVGO plugins and overrides config.path when present', () => {
   let observed;
   const capture = { name: 'capturePath', fn: (_root, _params, info) => { observed = info.path; } };
@@ -198,6 +209,61 @@ test('native CSS policy detects dynamic rules before static optimization removes
   assert.match(plugin(commented, { native: true, runtimeConfig: false }), /fill="red"/);
   const cdata = input.replace('<style>', '<style><![CDATA[').replace('</style>', ']]></style>');
   assert.throws(() => plugin(cdata, { native: true, runtimeConfig: false }), /could not be inlined safely/);
+});
+
+test('native mode inlines structural selectors with a leading style element', () => {
+  const input = (css) => `<svg><style>${css}</style><path d="M0 0h1v1z"/><path class="b" d="M2 0h1v1z"/></svg>`;
+  for (const css of [
+    'path:not(.b){fill:red}', 'path:nth-child(2){fill:red}', '@charset "UTF-8";path:nth-child(2){fill:red}',
+    'path:first-child,path:nth-child(2){fill:red}',
+  ]) {
+    for (const svgoConfig of [undefined, { plugins: [] }]) {
+      const warnings = [];
+      const result = plugin(input(css), { native: true, nativeCss: 'warn', runtimeConfig: false, svgoConfig },
+        { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } });
+      const paths = result.match(/<path\b[^>]*\/>/g);
+      assert.equal(paths.length, 2, css);
+      assert.match(paths[0], /fill="red"/, css);
+      assert.doesNotMatch(paths[1], /fill="red"/, css);
+      assert.equal(warnings.length, 0, css);
+      assert.doesNotMatch(result, /<style/, css);
+    }
+  }
+  const firstChild = plugin(input('path:first-child{fill:red}'), { native: true, runtimeConfig: false });
+  assert.doesNotMatch(firstChild, /fill="red"|<style/);
+  const warnings = [];
+  assert.doesNotThrow(() => plugin(input('@charset "UTF-8";'), { native: true, nativeCss: 'warn', runtimeConfig: false },
+    { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } }));
+  assert.equal(warnings.length, 0);
+});
+
+test('native CSS warn mode removes dynamic selector branches without dropping static branches', () => {
+  const input = '<svg><style>.a,.a:hover{fill:red}.a:not(:hover){fill:blue}</style><path class="a" d="M0 0h1v1z"/></svg>';
+  const warnings = [];
+  const output = plugin(input, { native: true, nativeCss: 'warn', runtimeConfig: false },
+    { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } });
+  assert.equal(warnings.length, 1);
+  assert.match(output, /fill="red"/);
+  assert.doesNotMatch(output, /blue|#00f|hover/);
+});
+
+test('native CSS rejects dynamic pseudo-classes, pseudo-elements and unsupported at-rules', () => {
+  const cases = [
+    '.a:hover{fill:blue}', '.a:focus{fill:blue}', '.a:active{fill:blue}', '.a:visited{fill:blue}',
+    '.a:focus-visible{fill:blue}', '.a:not(:hover){fill:blue}', '.a::before{fill:blue}', '.a:before{fill:blue}',
+    '@media (min-width:1px){.a{fill:blue}}', '@supports (display:grid){.a{fill:blue}}',
+    '@font-face{font-family:Example;src:url(example.woff)}', '@keyframes spin{from{opacity:0}to{opacity:1}}',
+    '@import url(example.css);',
+  ];
+  for (const css of cases) {
+    const input = `<svg><style>.a{fill:red}${css}</style><path class="a" d="M0 0h1v1z"/></svg>`;
+    assert.throws(() => plugin(input, { native: true, runtimeConfig: false }), /could not be inlined safely/, css);
+    const warnings = [];
+    const output = plugin(input, { native: true, nativeCss: 'warn', runtimeConfig: false },
+      { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } });
+    assert.equal(warnings.length, 1, css);
+    assert.match(output, /fill="red"/, css);
+  }
 });
 
 test('native CSS policy handles exporter styles with explicit warnings or dropping', () => {
