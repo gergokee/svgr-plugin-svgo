@@ -8,6 +8,7 @@ declare namespace svgComponentLoader {
     babel?: boolean;
     babelTargets?: string | string[] | Record<string, string | boolean>;
     nativeCss?: 'error' | 'warn' | 'drop';
+    prefixIds?: 'auto' | false;
   }
   interface LoaderContext {
     resourcePath: string;

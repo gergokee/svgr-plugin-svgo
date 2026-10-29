@@ -10,7 +10,7 @@ const loader = require('../loader.cjs');
 
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><defs><linearGradient id="paint"><stop stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs><path d="M0 0h10v10z" fill="url(#paint)"/></svg>';
 
-function run(source, options = {}, resourcePath = '/project/icon.svg', sourceMap = false) {
+function run(source, options = {}, resourcePath = '/project/icon.svg', sourceMap = false, rootContext = path.dirname(resourcePath)) {
   let cacheable;
   const dependencies = [];
   const missing = [];
@@ -18,7 +18,7 @@ function run(source, options = {}, resourcePath = '/project/icon.svg', sourceMap
   return new Promise((resolve, reject) => {
     const context = {
       resourcePath,
-      rootContext: path.dirname(resourcePath),
+      rootContext,
       sourceMap,
       getOptions: () => options,
       cacheable: (value) => { cacheable = value; },
@@ -38,6 +38,17 @@ test('emits JavaScript with requested named export and default optimizer', async
   assert.match(code, /viewBox/);
   assert.doesNotMatch(code, /<svg/);
   assert.equal(cacheable, false);
+});
+
+test('custom SVGO list can use file-specific automatic prefixes in loader options', async () => {
+  const options = { svgoConfig: { plugins: ['preset-default'] }, prefixIds: 'auto', runtimeConfig: false };
+  const first = await run(svg, options, '/project/a/icon.svg', false, '/project');
+  const second = await run(svg, options, '/project/b/icon.svg', false, '/project');
+  const id = (code) => code.match(/id: "(svg_[a-f0-9]{12}__[^\"]+)"/)?.[1];
+  assert.ok(id(first.code));
+  assert.notEqual(id(first.code), id(second.code));
+  const disabled = await run(svg, { ...options, prefixIds: false });
+  assert.doesNotMatch(disabled.code, /svg_[a-f0-9]{12}__/);
 });
 
 test('supports default export, svgo: false and dimensions: false', async () => {
@@ -116,6 +127,14 @@ test('rejects ESM .js and asynchronous CommonJS SVGR configs clearly', async (t)
   fs.rmSync(path.join(directory, 'svgr.config.js'));
   fs.writeFileSync(path.join(directory, 'svgr.config.cjs'), 'module.exports = Promise.resolve({ icon: true });');
   await assert.rejects(run(svg, {}, file), /must export a synchronous object/);
+});
+
+test('rejects ESM syntax in an untyped .js SVGR config consistently', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loader-untyped-esm-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(directory, 'package.json'), '{}');
+  fs.writeFileSync(path.join(directory, 'svgr.config.js'), 'export default { icon: true };');
+  await assert.rejects(run(svg, {}, path.join(directory, 'icon.svg')), /unsupported SVGR config.*svgr\.config\.js/);
 });
 
 test('native mode emits react-native-svg imports', async () => {
@@ -214,6 +233,17 @@ test('reloads changed SVGO and Prettier configurations between transforms', asyn
   const second = await run(svg, { babel: false }, file);
   assert.match(second.code, /viewBox/);
   assert.match(second.code, /from "react"/);
+});
+
+test('tracks unsupported SVGO config names for watching and reports newly added files', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loader-svgo-format-watch-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'icon.svg');
+  const first = await run(svg, {}, file);
+  assert.ok(first.missing.includes(path.join(fs.realpathSync(directory), 'svgo.config.mjs')));
+  fs.writeFileSync(path.join(directory, 'svgo.config.mjs'), 'export default { multipass: true };');
+  await assert.rejects(run(svg, {}, file), /unsupported SVGO config.*svgo\.config\.mjs/);
+  assert.match((await run(svg, { svgoConfig: {} }, file)).code, /viewBox/);
 });
 
 test('a process restart loads changed CommonJS Prettier configuration', async (t) => {

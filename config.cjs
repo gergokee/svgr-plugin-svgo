@@ -11,9 +11,15 @@ const svgrPlaces = [
   ...rcExtensions.map((ext) => `.config/svgrrc${ext}`),
   ...['.js', '.ts', '.cjs', '.mjs', '.cts', '.mts'].map((ext) => `svgr.config${ext}`),
 ];
+const configExtensions = ['.js', '.ts', '.cjs', '.mjs', '.cts', '.mts'];
+const svgoPlaces = [
+  'package.json',
+  ...['.json', '.yaml', '.yml', ...configExtensions].map((ext) => `.svgo${ext}`),
+  ...rcExtensions.map((ext) => `.svgorc${ext}`),
+  ...configExtensions.map((ext) => `svgo.config${ext}`),
+];
 const watchPlaces = [
-  ...svgrPlaces, '.svgo.json', '.svgo.yaml', '.svgo.yml', '.svgo.js', '.svgo.cjs', '.svgorc',
-  '.svgorc.json', '.svgorc.yaml', '.svgorc.yml', '.svgorc.js', '.svgorc.cjs', 'svgo.config.js', 'svgo.config.cjs',
+  ...new Set([...svgrPlaces, ...svgoPlaces]),
   '.prettierrc', '.prettierrc.json', '.prettierrc.yml', '.prettierrc.yaml', '.prettierrc.json5',
   '.prettierrc.js', '.prettierrc.cjs', '.prettierrc.mjs', 'prettier.config.js', 'prettier.config.cjs',
   'prettier.config.mjs', '.editorconfig',
@@ -48,10 +54,10 @@ function registerConfigFiles(context, options) {
   }
 }
 
-function resolveSvgrConfig(options, filePath) {
-  if (options.runtimeConfig === false) return null;
+function createConfigExplorer(name, places, prefix) {
+  const label = name.toUpperCase();
   const unsupported = (file) => {
-    throw new Error(`svgr-plugin-svgo/loader: unsupported SVGR config ${file}; use JSON, YAML, or synchronous CommonJS (.cjs)`);
+    throw new Error(`${prefix}: unsupported ${label} config ${file}; use JSON, YAML, or synchronous CommonJS (.cjs)`);
   };
   const loadJs = (file, content) => {
     let directory = dirname(file);
@@ -65,20 +71,44 @@ function resolveSvgrConfig(options, filePath) {
       if (parent === directory) break;
       directory = parent;
     }
-    return defaultLoadersSync['.js'](file, content);
-  };
-  const explorer = cosmiconfigSync('svgr', {
-    searchPlaces: svgrPlaces, cache: false,
-    loaders: { '.js': loadJs, '.mjs': unsupported, '.ts': unsupported, '.cts': unsupported, '.mts': unsupported },
-  });
-  const readResult = (result) => {
-    if (!result) return null;
-    const config = result.config;
-    if (config == null || typeof config !== 'object' || Array.isArray(config) || typeof config.then === 'function') {
-      throw new Error(`svgr-plugin-svgo/loader: SVGR config ${result.filepath} must export a synchronous object`);
+    let config;
+    try {
+      config = defaultLoadersSync['.js'](file, content);
+    } catch (error) {
+      if (error.code === 'ERR_REQUIRE_ESM' || error.code === 'ERR_REQUIRE_ASYNC_MODULE' || error instanceof SyntaxError) {
+        return unsupported(file);
+      }
+      throw error;
     }
+    // Recent Node versions can synchronously require ESM even without a
+    // package type declaration; a namespace is not the config object.
+    if (Object.prototype.toString.call(config) === '[object Module]') return unsupported(file);
     return config;
   };
+  return cosmiconfigSync(name, {
+    searchPlaces: places, cache: false,
+    loaders: { '.js': loadJs, '.mjs': unsupported, '.ts': unsupported, '.cts': unsupported, '.mts': unsupported },
+  });
+}
+
+function validateConfig(config, label) {
+  const prototype = config && typeof config === 'object' ? Object.getPrototypeOf(config) : undefined;
+  if (!config || typeof config !== 'object' || Array.isArray(config) || typeof config.then === 'function' ||
+    (prototype !== Object.prototype && prototype !== null)) {
+    throw new TypeError(`${label} must export a synchronous object (plain object required)`);
+  }
+  return config;
+}
+
+function readConfigResult(result, label) {
+  if (!result) return null;
+  return validateConfig(result.config, `${label} ${result.filepath}`);
+}
+
+function resolveSvgrConfig(options, filePath) {
+  if (options.runtimeConfig === false) return null;
+  const explorer = createConfigExplorer('svgr', svgrPlaces, 'svgr-plugin-svgo/loader');
+  const readResult = (result) => readConfigResult(result, 'svgr-plugin-svgo/loader: SVGR config');
   if (options.configFile) return readResult(explorer.load(resolve(options.configFile)));
   let directory = dirname(resolve(filePath));
   while (true) {
@@ -90,4 +120,16 @@ function resolveSvgrConfig(options, filePath) {
   }
 }
 
-module.exports = { registerConfigFiles, resolveSvgrConfig };
+function resolveSvgoConfig(filePath) {
+  const explorer = createConfigExplorer('svgo', svgoPlaces, 'svgr-plugin-svgo');
+  let directory = filePath ? dirname(resolve(filePath)) : process.cwd();
+  while (true) {
+    const result = explorer.search(directory);
+    if (result) return readConfigResult(result, 'svgr-plugin-svgo: SVGO config');
+    const parent = dirname(directory);
+    if (parent === directory) return null;
+    directory = parent;
+  }
+}
+
+module.exports = { registerConfigFiles, resolveSvgrConfig, resolveSvgoConfig, validateConfig };

@@ -40,8 +40,8 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   fs.writeFileSync(path.join(project, 'types.cts'), `
     import plugin = require('svgr-plugin-svgo');
     import loader = require('svgr-plugin-svgo/loader');
-    const options: loader.LoaderOptions = { exportType: 'named', babelTargets: { ie: '11' }, nativeCss: 'warn' };
-    const result: string = plugin('<svg/>', { svgo: false, nativeCss: 'drop' });
+    const options: loader.LoaderOptions = { exportType: 'named', babelTargets: { ie: '11' }, nativeCss: 'warn', prefixIds: 'auto' };
+    const result: string = plugin('<svg/>', { svgo: false, nativeCss: 'drop', prefixIds: false });
     console.log(result, options);
   `);
   run(process.execPath, [path.join(project, 'node_modules', 'typescript', 'bin', 'tsc'),
@@ -140,26 +140,37 @@ test('packed loader supports documented webpack patterns and Next.js Turbopack',
   `);
   await build({ ...config, entry: './native-entry.js', output: { ...config.output, filename: 'native.js' },
     resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
-    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader', options: { native: true } }] }] },
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader',
+      options: { native: true, svgoConfig: { plugins: ['removeStyleElement'] } } }] }] },
   });
   const nativeMarkup = render(require(path.join(project, 'dist', 'native.js')).Icon);
-  assert.match(nativeMarkup, /fill="red"/);
-  assert.match(nativeMarkup, /M0 0h5v5H0zM6 0h5v5H6z/);
+  assert.equal((nativeMarkup.match(/fill="red"/g) || []).length, 2);
 
   fs.writeFileSync(path.join(project, 'app', 'native-warn.svg'), '<svg style="isolation:isolate"><path d="M0 0h1v1z" fill="red"/></svg>');
   fs.writeFileSync(path.join(project, 'native-warn-entry.js'), 'export { default as Icon } from "./app/native-warn.svg";');
   const nativeWarnings = await build({ ...config, entry: './native-warn-entry.js', output: { ...config.output, filename: 'native-warn.js' },
     resolve: { alias: { 'react-native-svg': path.join(project, 'native-mock.js') } },
-    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader', options: { native: true, nativeCss: 'warn' } }] }] },
+    module: { rules: [{ test: /\.svg$/, use: [{ loader: 'svgr-plugin-svgo/loader',
+      options: { native: true, nativeCss: 'warn', svgoConfig: { plugins: [] } } }] }] },
   });
   assert.match(nativeWarnings.toString({ warnings: true }), /unsupported CSS will be dropped/);
   assert.match(render(require(path.join(project, 'dist', 'native-warn.js')).Icon), /fill="red"/);
 
+  fs.mkdirSync(path.join(project, 'app', 'a'));
+  fs.mkdirSync(path.join(project, 'app', 'b'));
+  fs.writeFileSync(path.join(project, 'app', 'a', 'icon.svg'), svg);
+  fs.writeFileSync(path.join(project, 'app', 'b', 'icon.svg'), svg);
+  fs.writeFileSync(path.join(project, 'app', 'page.js'), 'import { ReactComponent as A } from "./a/icon.svg"; import { ReactComponent as B } from "./b/icon.svg"; export default function Page() { return <><A /><B /></>; }');
+  const nextOptions = { exportType: 'named', namedExport: 'ReactComponent', svgoConfig: { plugins: ['preset-default'] }, prefixIds: 'auto' };
   fs.writeFileSync(path.join(project, 'next.config.js'), `module.exports = {
-    turbopack: { rules: { '*.svg': { loaders: [{ loader: 'svgr-plugin-svgo/loader', options: ${JSON.stringify(options)} }], as: '*.js' } } }
+    turbopack: { rules: { '*.svg': { loaders: [{ loader: 'svgr-plugin-svgo/loader', options: ${JSON.stringify(nextOptions)} }], as: '*.js' } } }
   };`);
   run(process.execPath, [path.join(project, 'node_modules', 'next', 'dist', 'bin', 'next'), 'build']);
-  assertSvg(fs.readFileSync(path.join(project, '.next', 'server', 'app', 'index.html'), 'utf8'));
+  const html = fs.readFileSync(path.join(project, '.next', 'server', 'app', 'index.html'), 'utf8');
+  assertSvg(html);
+  const ids = [...html.matchAll(/id="(svg_[a-f0-9]{12}__[^"]+)"/g)].map((match) => match[1]);
+  assert.equal(ids.length, 2);
+  assert.notEqual(ids[0], ids[1]);
 
   // A real watch rebuild must pick up a changed config without restarting webpack.
   fs.mkdirSync(path.join(project, '.config'));

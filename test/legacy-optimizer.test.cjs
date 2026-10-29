@@ -34,7 +34,7 @@ test('legacy and independent optimizers have comparable observable SVG behavior'
     assert.ok(id && id !== 'paint', `${name}: expected prefixed ID`);
     assert.ok(output.includes(`url(#${id})`), `${name}: reference must match ID`);
     assert.equal(plugin(svg, { ...opts, svgo: false }, state), svg, name);
-    const custom = plugin(svg, { ...opts, svgoConfig: { plugins: ['removeComments'] } }, state);
+    const custom = plugin(svg, { ...opts, prefixIds: false, svgoConfig: { plugins: ['removeComments'] } }, state);
     assert.doesNotMatch(custom, /<!--comment-->/, name);
     assert.match(custom, /id="paint"/, name);
     assert.throws(() => plugin('<svg><path></svg>', opts, state), undefined, name);

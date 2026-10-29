@@ -35,7 +35,23 @@ test('explicit plugin list is respected, including intentional viewBox removal',
   const result = plugin(svg, { svgoConfig: { plugins: ['removeViewBox'] } });
   assert.doesNotMatch(result, /viewBox/);
   assert.match(result, /comment/);
-  assert.match(result, /id="paint"/);
+  assert.match(result, /id="svg_[a-f0-9]{12}__paint"/);
+});
+
+test('custom plugin lists retain file-specific prefixes unless explicitly disabled or supplied', () => {
+  const options = { svgoConfig: { plugins: ['preset-default'] }, prefixIds: 'auto' };
+  const first = plugin(svg, options, { filePath: 'a/icon.svg' });
+  const second = plugin(svg, options, { filePath: 'b/icon.svg' });
+  const id = (output) => output.match(/id="([^"]+)"/)?.[1];
+  assert.match(id(first), /^svg_[a-f0-9]{12}__/);
+  assert.notEqual(id(first), id(second));
+  assert.ok(first.includes(`url(#${id(first)})`));
+  const unprefixed = plugin(svg, { ...options, prefixIds: false });
+  assert.doesNotMatch(unprefixed, /svg_[a-f0-9]{12}__/);
+  const custom = { svgoConfig: { plugins: [{ name: 'prefixIds', params: { prefix: 'chosen' } }] } };
+  assert.match(plugin(svg, custom), /id="chosen__paint"/);
+  assert.match(plugin(svg, { ...custom, prefixIds: false }), /id="chosen__paint"/);
+  assert.throws(() => plugin(svg, { prefixIds: true }), /prefixIds must be auto or false/);
 });
 
 test('config without plugins retains defaults', () => {
@@ -57,6 +73,61 @@ test('discovers nearest config, honors runtimeConfig and gives explicit config p
   assert.match(plugin(svg, {}, state), /viewBox/);
 });
 
+test('rejects unsupported discovered SVGO config formats instead of ignoring them', (t) => {
+  for (const name of ['svgo.config.mjs', 'svgo.config.ts', '.svgorc.mjs', '.svgorc.ts', '.svgo.mts']) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'svgo-unsupported-config-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(root, name), 'export default { multipass: true };');
+    const state = { filePath: path.join(root, 'icon.svg') };
+    assert.throws(() => plugin(svg, {}, state), (error) => error.message.includes('unsupported SVGO config') && error.message.includes(name));
+    assert.match(plugin(svg, { runtimeConfig: false }, state), /viewBox/);
+    assert.match(plugin(svg, { svgoConfig: {} }, state), /viewBox/);
+  }
+});
+
+test('rejects ESM .js, promises, functions, arrays and non-plain SVGO configurations', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'svgo-invalid-config-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'icon.svg');
+  fs.writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
+  const configFile = path.join(root, 'svgo.config.js');
+  fs.writeFileSync(configFile, 'export default { multipass: true };');
+  assert.throws(() => plugin(svg, {}, { filePath: file }), /unsupported SVGO config.*svgo\.config\.js/);
+  assert.match(plugin(svg, { svgoConfig: {} }, { filePath: file }), /viewBox/);
+  fs.rmSync(configFile);
+  const cjsFile = path.join(root, 'svgo.config.cjs');
+  for (const body of [
+    'module.exports = Promise.resolve({ multipass: true });',
+    'module.exports = () => ({ multipass: true });',
+    'module.exports = [];',
+    'module.exports = new Date();',
+  ]) {
+    fs.writeFileSync(cjsFile, body);
+    assert.throws(() => plugin(svg, {}, { filePath: file }), /SVGO config.*must export a synchronous object/);
+  }
+  for (const bad of [Promise.resolve({}), [], () => ({}), new Date(), { then() {} }]) {
+    assert.throws(() => plugin(svg, { svgoConfig: bad }), /SVGO configuration must export a synchronous object/);
+  }
+  const nullPrototype = Object.create(null);
+  assert.match(plugin(svg, { svgoConfig: nullPrototype }), /viewBox/);
+});
+
+test('rejects ESM syntax in an untyped .js SVGO config consistently', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'svgo-untyped-esm-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, 'package.json'), '{}');
+  fs.writeFileSync(path.join(root, 'svgo.config.js'), 'export default { multipass: true };');
+  assert.throws(() => plugin(svg, {}, { filePath: path.join(root, 'icon.svg') }), /unsupported SVGO config.*svgo\.config\.js/);
+});
+
+test('rejects an asynchronous CommonJS .js SVGO config', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'svgo-async-js-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, 'package.json'), '{}');
+  fs.writeFileSync(path.join(root, 'svgo.config.js'), 'module.exports = Promise.resolve({ multipass: true });');
+  assert.throws(() => plugin(svg, {}, { filePath: path.join(root, 'icon.svg') }), /SVGO config.*must export a synchronous object/);
+});
+
 test('passes filePath to custom SVGO plugins and overrides config.path when present', () => {
   let observed;
   const capture = { name: 'capturePath', fn: (_root, _params, info) => { observed = info.path; } };
@@ -72,9 +143,32 @@ test('reports invalid input and malformed SVG clearly', () => {
 });
 
 test('native mode removes style elements when using defaults', () => {
-  const input = '<svg xmlns="http://www.w3.org/2000/svg"><style>.unused{fill:red}</style><path d="M0 0h1v1z"/></svg>';
+  const input = '<svg xmlns="http://www.w3.org/2000/svg"><style>.used{fill:red}</style><path class="used" d="M0 0h1v1z"/></svg>';
   assert.doesNotMatch(plugin(input, { native: true, runtimeConfig: false }), /<style/);
-  assert.match(plugin(input, { native: true, svgoConfig: { plugins: [] } }), /<style/);
+  const custom = plugin(input, { native: true, svgoConfig: { plugins: [] } });
+  assert.doesNotMatch(custom, /<style/);
+  assert.match(custom, /fill="red"/);
+});
+
+test('native CSS safeguards run with custom SVGO plugin lists', () => {
+  const input = '<svg><style>.a{fill:red}</style><rect class="a" width="5" height="5"/><rect class="a" x="6" width="5" height="5"/></svg>';
+  for (const plugins of [[], ['removeStyleElement']]) {
+    const config = { native: true, svgoConfig: { plugins } };
+    const output = plugin(input, config);
+    assert.doesNotMatch(output, /<style/);
+    assert.equal((output.match(/fill="red"/g) || []).length, 2);
+    const dynamic = input.replace('.a{fill:red}', '.a{fill:red}.a:hover{fill:blue}');
+    assert.throws(() => plugin(dynamic, config), /could not be inlined safely/);
+    const warnings = [];
+    const warned = plugin(dynamic, { ...config, nativeCss: 'warn' }, { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } });
+    assert.equal(warnings.length, 1);
+    assert.equal((warned.match(/fill="red"/g) || []).length, 2);
+  }
+  const addStyle = { name: 'addStyle', fn: () => ({ element: { enter(node) {
+    if (node.name === 'rect') node.attributes.style = 'isolation:isolate';
+  } } }) };
+  assert.throws(() => plugin('<svg><rect width="5" height="5"/></svg>',
+    { native: true, svgoConfig: { plugins: [addStyle] } }), /could not be converted/);
 });
 
 test('native mode applies shared CSS and rejects rules that cannot be inlined', () => {
@@ -87,6 +181,23 @@ test('native mode applies shared CSS and rejects rules that cannot be inlined', 
     { native: true, runtimeConfig: false }), /could not be inlined safely/);
   assert.throws(() => plugin('<svg><path d="M0 0h1v1z" style="--custom:red"/></svg>',
     { native: true, runtimeConfig: false }), /could not be converted/);
+});
+
+test('native CSS policy detects dynamic rules before static optimization removes them', () => {
+  const input = '<svg><style>.a{fill:red}.a:hover{fill:blue}</style><rect class="a" width="5" height="5"/></svg>';
+  assert.throws(() => plugin(input, { native: true, runtimeConfig: false }), /could not be inlined safely/);
+  const warnings = [];
+  const state = { caller: { onNativeCssWarning: (warning) => warnings.push(warning) } };
+  const result = plugin(input, { native: true, nativeCss: 'warn', runtimeConfig: false }, state);
+  assert.equal(warnings.length, 1);
+  assert.match(result, /fill="red"/);
+  assert.doesNotMatch(result, /hover|blue|<style/);
+  const dropped = plugin(input, { native: true, nativeCss: 'drop', runtimeConfig: false });
+  assert.equal(dropped, result);
+  const commented = input.replace('.a:hover{fill:blue}', '/* .a:hover{fill:blue} */');
+  assert.match(plugin(commented, { native: true, runtimeConfig: false }), /fill="red"/);
+  const cdata = input.replace('<style>', '<style><![CDATA[').replace('</style>', ']]></style>');
+  assert.throws(() => plugin(cdata, { native: true, runtimeConfig: false }), /could not be inlined safely/);
 });
 
 test('native CSS policy handles exporter styles with explicit warnings or dropping', () => {

@@ -61,7 +61,9 @@ Then `import { ReactComponent } from './icon.svg'`. For webpack 5, use the
 same loader object in a `module.rules` rule with `test: /\.svg$/i`. No npm
 override is needed for this loader. `svgoConfig: {}` uses this package's
 defaults and deliberately bypasses discovered SVGO config; omit it if you want
-discovery. A custom SVGO plugin list replaces those defaults. In SVGO 4, omit
+discovery. A custom SVGO plugin list replaces the default optimization list;
+automatic prefixing and native safety checks remain unless configured otherwise.
+In SVGO 4, omit
 the old `preset-default` override `removeViewBox: false`: `removeViewBox` is no
 longer in the preset, and specifying that override causes an SVGO warning.
 
@@ -75,6 +77,8 @@ documented transformation options:
   `template`, `configFile`, `runtimeConfig`, `svgo` and `svgoConfig`.
 - `nativeCss: 'error' | 'warn' | 'drop'` controls unconverted native CSS;
   `error` is the default (see below).
+- `prefixIds: 'auto' | false` controls the package's automatic ID prefixing;
+  `auto` is the default, including with a custom SVGO plugin list.
 - `prettier` and `prettierConfig`; when runtime config is enabled, Prettier
   config discovery is used unless `prettierConfig` is supplied explicitly.
 - `jsxRuntime: 'classic' | 'automatic' | 'classic-preact'` and `typescript`.
@@ -148,17 +152,23 @@ It uses the first nonempty configuration in this order within each directory:
 3. `.svgorc`, `.svgorc.json`, `.svgorc.yaml`, `.svgorc.yml`, `.svgorc.js`, `.svgorc.cjs`
 4. `svgo.config.js`, `svgo.config.cjs`
 
-JavaScript configuration must be synchronous CommonJS (`module.exports`); use
-`.cjs` in an ESM project. `.mjs`, async and TypeScript config files are not
-discovered. `runtimeConfig: false` skips discovery but not an explicit
-`svgoConfig`. Configuration files are code: only load trusted files.
+JavaScript configuration must export a synchronous plain object using CommonJS
+(`module.exports`); use `.cjs` in an ESM project. `.mjs`, `.ts`, `.cts` and
+`.mts` variants of these names and `.js` files in ESM packages are detected in
+search order but rejected with a clear error; asynchronous exports and
+non-plain objects are rejected too. `runtimeConfig: false` skips discovery but
+not an explicit `svgoConfig`. Configuration files are code: only load trusted
+files.
 
 Without a configured `plugins` list, the plugin runs SVGO's `preset-default`,
 then `prefixIds`. SVGO 4 preserves `viewBox` by default. When `native: true`,
 CSS is inlined even when selectors match multiple elements, and presentation
 styles are converted to SVG attributes before style elements are removed.
 Remaining styles, such as unsupported media queries, pseudo-classes or CSS
-properties, cause an error rather than being silently dropped by default.
+properties, cause an error rather than being silently dropped by default. A
+preflight check also rejects pseudo-selectors and at-rules before optimization,
+including ones that SVGO might otherwise discard; this is conservative and may
+reject selectors that would not affect the native rendering.
 For native icon sets containing unsupported design-tool styles, set:
 
 ```js
@@ -175,21 +185,25 @@ guarantee that every SVG/CSS feature is supported by react-native-svg; test
 the result on your target platform. SVGR's JSX plugin handles native element
 conversion and removal of unsupported elements.
 
-**A custom `svgoConfig.plugins` list replaces the defaults entirely**, including
-ID prefixing and native CSS safeguards. For example, `plugins: ['preset-default']`
-does not enable `prefixIds`. Use `svgoConfig: {}` or set options such as
-`multipass` without a plugin list to retain defaults. If specifying a custom
-list, explicitly include and configure `prefixIds` as appropriate:
+**A custom `svgoConfig.plugins` list replaces the default optimization list**,
+but the package still adds its file-and-content-based ID prefix by default.
+With `native: true`, CSS preflight, inlining and safety checks also run around
+the custom list. Arbitrary custom plugins can still deliberately remove or
+rewrite content before a later check can inspect it. For example:
 
 ```js
-svgoConfig: {
-  plugins: ['preset-default', 'prefixIds'],
+{
+  svgoConfig: { plugins: ['preset-default'] },
+  prefixIds: 'auto', // default
 }
 ```
 
-The example's SVGO `prefixIds` uses SVGO's own prefix behavior, not this
-package's content-and-path hash. An explicit `removeViewBox` can remove the
-viewBox where SVGO considers it redundant. Other SVGO options pass through.
+If the custom list includes `prefixIds` (as a string or plugin object), its
+configuration is used instead and no automatic prefix is added. Setting
+`prefixIds: false` disables **automatic** prefixing; an explicitly listed
+`prefixIds` plugin still runs. This preserves control over the SVGO plugin
+list. An explicit `removeViewBox` can remove the viewBox where SVGO considers
+it redundant. Other SVGO options pass through.
 The SVGR `state.filePath`, when present, is passed as SVGO's `path` and takes
 precedence over a configured `path`.
 
@@ -199,7 +213,11 @@ the file path relative to the project root (webpack's `rootContext`, or
 different prefixes, and the same project-relative path and markup are stable
 across build roots. Without a file path, only the markup is used. Repeated
 renders of the same component still share IDs: this is **not** per-instance ID
-isolation. Use per-instance IDs in your component if that is required.
+isolation. For example, in some browsers a hidden first copy (such as an
+inactive tab) can cause a visible copy's gradient, mask or clip path to fail;
+different definitions controlled by props can also resolve to the first copy.
+Duplicate IDs can be flagged by validation and accessibility tools. Use
+per-instance IDs in your component if that is required.
 Custom `prefixIds` settings are the caller's responsibility, including their
 determinism. Invalid types, malformed XML and non-SVG roots produce errors.
 This optimizer is **not** an SVG sanitizer; sanitize untrusted content separately.

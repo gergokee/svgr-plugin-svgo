@@ -5,6 +5,9 @@ type PluginState = Omit<Partial<State>, 'caller'> & {
 };
 
 /** Optimizes SVG markup for an SVGR pipeline. */
-declare function svgrPluginSvgo(source: string, options?: Config & { nativeCss?: 'error' | 'warn' | 'drop' }, state?: PluginState): string;
+declare function svgrPluginSvgo(source: string, options?: Config & {
+  nativeCss?: 'error' | 'warn' | 'drop';
+  prefixIds?: 'auto' | false;
+}, state?: PluginState): string;
 
 export = svgrPluginSvgo;
